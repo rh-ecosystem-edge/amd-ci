@@ -1,0 +1,6 @@
+# Requirements for AMD GPU Operator CI - OpenShift Version Detection
+# Install with: pip install -r amd_ci_requirements.txt
+
+requests>=2.31.0
+semver>=3.0.0
+
