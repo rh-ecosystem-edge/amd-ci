@@ -1,0 +1,6 @@
+# Requirements for AMD GPU Operator CI Workflows
+# Install with: pip install -r requirements.txt
+
+requests>=2.31.0
+semver>=3.0.0
+
