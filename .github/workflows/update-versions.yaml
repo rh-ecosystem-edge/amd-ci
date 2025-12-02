@@ -1,0 +1,66 @@
+name: Check for new versions
+on:
+  push:
+    branches:
+      - add-new-amd-ci-workflow
+  schedule:
+    - cron: '0 0 * * 0-5'
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to check out'
+        default: 'main'
+        required: false
+        type: string
+jobs:
+  ocp-version:
+    if: github.event_name != 'schedule' || github.repository == 'rh-ecosystem-edge/amd-ci' || vars.VERSION_UPDATE_FLOW_ENABLE_SCHEDULED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the Repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || github.ref }}
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.13
+      - name: Update OCP Version
+        id: read_tests
+        run: |
+          pip install -r workflows/gpu_operator_versions/requirements.txt
+          mkdir -p $(dirname ${TEST_TO_TRIGGER_FILE_PATH})
+          python -m workflows.gpu_operator_versions.update_versions
+          {
+           echo 'TEST_TRIGGERS<<EOF'
+           cat ${TEST_TO_TRIGGER_FILE_PATH}
+           echo 'EOF'
+          } >> $GITHUB_OUTPUT
+
+        env:
+          GH_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OCP_IGNORED_VERSIONS_REGEX: "^4.19.0-rc.0$|^4.18.22$"
+          VERSION_FILE_PATH: "workflows/gpu_operator_versions/versions.json"
+          TEST_TO_TRIGGER_FILE_PATH: "workflows/generated-files/tests_to_trigger.txt"
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          title: "[Automatic] Update versions, run ID: ${{ github.run_id }}"
+          commit-message: Update versions
+          branch: update-versions/${{ github.run_id }}
+          body: |
+            :warning: Before approving the PR, run the following tests:
+
+            ```
+            ${{ steps.read_tests.outputs.TEST_TRIGGERS }}
+            /ok-to-test
+            /approve
+            ```
+
+            Update the AMD GPU operator on OpenShift test matrix
+            ---
+            ${{ vars.VERSION_UPDATE_FLOW_NOTIFY_USERS }}
+          delete-branch: true
+          assignees: ${{ vars.VERSION_UPDATE_FLOW_ASSIGNEES }}
+
+            

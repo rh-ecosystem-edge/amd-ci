@@ -1,0 +1,128 @@
+name: Generate test matrices pages
+
+on:
+  push:
+    branches:
+      - add-new-amd-ci-workflow
+  pull_request_target:
+    branches:
+      - main
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to check out'
+        default: 'main'
+        required: false
+        type: string
+      pr_number:
+        description: 'PR number to process (must be specified as a number or "all")'
+        required: false
+        default: 'all'
+        type: string
+      gh_pages_branch:
+        description: 'GitHub pages branch to update'
+        default: 'gh-pages'
+        required: false
+        type: string
+permissions:
+  contents: write
+jobs:
+  generate-matrix:
+    if: github.event_name != 'pull_request_target' || github.repository == 'rh-ecosystem-edge/amd-ci'
+    runs-on: ubuntu-latest
+    env:
+      DASHBOARD_OUTPUT_DIR: 'workflows/test_matrix_dashboard/output'
+    steps:
+      - name: Set dynamic env vars
+        run: |
+          echo "DASHBOARD_DATA_FILEPATH=${DASHBOARD_OUTPUT_DIR}/amd_gpu_operator_matrix.json" >> "$GITHUB_ENV"
+          echo "DASHBOARD_HTML_FILEPATH=${DASHBOARD_OUTPUT_DIR}/amd_gpu_operator_matrix.html" >> "$GITHUB_ENV"
+          echo "GH_PAGES_BRANCH=${{ github.event.inputs.gh_pages_branch || 'gh-pages' }}" >> "$GITHUB_ENV"
+        env:
+          DASHBOARD_OUTPUT_DIR: ${{ env.DASHBOARD_OUTPUT_DIR }}
+      - name: Determine PR Number
+        id: determine_pr
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request_target" ]; then
+              echo "Processing merged pull request."
+              echo "PR_NUMBER=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" == "push" ]; then
+              echo "Processing push event - using 'all' for PR number."
+              echo "PR_NUMBER=all" >> "$GITHUB_OUTPUT"
+          else
+              echo "PR_NUMBER=${{ github.event.inputs.pr_number || 'all' }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.event.inputs.branch || github.ref }}
+
+      - name: Checkout GitHub Pages
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: ${{ env.GH_PAGES_BRANCH }}
+          path: ${{ env.DASHBOARD_OUTPUT_DIR }}
+      
+      - name: Create output directory if not exists
+        run: |
+          mkdir -p ${{ env.DASHBOARD_OUTPUT_DIR }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Dependencies
+        run: |
+          pip install -r workflows/gpu_operator_dashboard/requirements.txt
+
+      - name: Fetch CI Data
+        run: |
+          echo "Processing PR: ${{ steps.determine_pr.outputs.PR_NUMBER }}"
+          python -m workflows.gpu_operator_dashboard.fetch_ci_data \
+            --pr_number "${{ steps.determine_pr.outputs.PR_NUMBER }}" \
+            --baseline_data_filepath "${{ env.DASHBOARD_DATA_FILEPATH }}" \
+            --merged_data_filepath "${{ env.DASHBOARD_DATA_FILEPATH }}"
+
+
+      - name: Generate HTML Dashboard (only if JSON changed)
+        run: |
+          cd "${{ env.DASHBOARD_OUTPUT_DIR }}"
+          if [[ ${{ github.event_name }} == "pull_request_target" ]] && git diff --exit-code amd_gpu_operator_matrix.json; then
+            echo "no changes"
+          else
+            cd "${{ github.workspace }}"
+            python -m workflows.gpu_operator_dashboard.generate_ci_dashboard \
+              --dashboard_data_filepath "${{ env.DASHBOARD_DATA_FILEPATH }}" \
+              --dashboard_html_filepath "${{ env.DASHBOARD_HTML_FILEPATH }}"
+          fi
+      
+      - name: Create index.html redirect
+        run: |
+          cat > "${{ env.DASHBOARD_OUTPUT_DIR }}/index.html" << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta http-equiv="refresh" content="0; url=amd_gpu_operator_matrix.html">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>AMD GPU Operator CI Dashboard</title>
+          </head>
+          <body>
+            <p>Redirecting to <a href="amd_gpu_operator_matrix.html">AMD GPU Operator Test Matrix</a>...</p>
+          </body>
+          </html>
+          EOF
+
+      - name: Deploy HTML to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: ${{ env.GH_PAGES_BRANCH }}
+          folder: ${{ env.DASHBOARD_OUTPUT_DIR }}
+          clean: false
+          force: false
+
