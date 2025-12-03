@@ -1,16 +1,16 @@
 import subprocess
-from typing import Dict
+from typing import Dict, List, Optional
 
 class DeployError(RuntimeError):
     """Custom error for deployment failures."""
 
 
 def run(
-    cmd: list[str],
+    cmd: List[str],
     *,
     check: bool = True,
     capture_output: bool = False,
-    env: Dict[str, str] | None = None,
+    env: Optional[Dict[str, str]] = None,
 ) -> subprocess.CompletedProcess:
     """Thin wrapper around subprocess.run with nicer error messages."""
     try:
