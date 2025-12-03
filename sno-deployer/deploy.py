@@ -33,6 +33,7 @@ def deploy_sno(
     remote_user: str = "root",
     wait_timeout: int = 3600,
     no_wait: bool = False,
+    ssh_key: Optional[str] = None,
 ) -> None:
     """
     Main deployment flow, driven by the kcli parameters.
@@ -44,6 +45,7 @@ def deploy_sno(
         remote_user: SSH user for remote host
         wait_timeout: Timeout in seconds for cluster ready (remote only)
         no_wait: Skip waiting for cluster ready (remote only)
+        ssh_key: Path to SSH private key file (optional)
     """
     ensure_kcli_installed()
     
@@ -76,6 +78,7 @@ def deploy_sno(
             dry_run=dry_run,
             wait_timeout=wait_timeout,
             no_wait=no_wait,
+            ssh_key=ssh_key,
         )
     else:
         _deploy_local(
@@ -113,6 +116,7 @@ def _deploy_remote(
     dry_run: bool,
     wait_timeout: int,
     no_wait: bool,
+    ssh_key: Optional[str] = None,
 ) -> None:
     """Deploy SNO cluster on a remote libvirt host."""
     from remote import (
@@ -122,7 +126,13 @@ def _deploy_remote(
         wait_for_cluster_ready,
         get_cluster_status,
         print_access_instructions,
+        set_ssh_key_path,
     )
+    
+    # Configure SSH key if provided
+    if ssh_key:
+        set_ssh_key_path(ssh_key)
+        print(f"Using SSH key: {ssh_key}")
     
     print(f"\n{'='*60}")
     print(f"Remote SNO Deployment")
@@ -133,6 +143,8 @@ def _deploy_remote(
     print(f"Domain: {domain}")
     print(f"Wait Timeout: {wait_timeout}s")
     print(f"No Wait: {no_wait}")
+    if ssh_key:
+        print(f"SSH Key: {ssh_key}")
     print(f"{'='*60}\n")
     
     # Setup remote host (idempotent)

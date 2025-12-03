@@ -15,13 +15,30 @@ from typing import Dict, Optional
 from common import DeployError, run
 
 
-# SSH options for non-interactive CI/CD use
-SSH_OPTS = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+# Base SSH options for non-interactive CI/CD use
+SSH_BASE_OPTS = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+
+# Module-level SSH key path (set via set_ssh_key_path)
+_ssh_key_path: Optional[str] = None
+
+
+def set_ssh_key_path(key_path: Optional[str]) -> None:
+    """Set the SSH key path to use for all SSH connections."""
+    global _ssh_key_path
+    _ssh_key_path = key_path
+
+
+def get_ssh_opts() -> str:
+    """Get SSH options, including identity file if configured."""
+    if _ssh_key_path:
+        return f"{SSH_BASE_OPTS} -i {_ssh_key_path}"
+    return SSH_BASE_OPTS
 
 
 def ssh_cmd(host: str, user: str, command: str, check: bool = True) -> subprocess.CompletedProcess:
     """Execute a command on the remote host via SSH."""
-    full_cmd = f"ssh {SSH_OPTS} {user}@{host} {command!r}"
+    ssh_opts = get_ssh_opts()
+    full_cmd = f"ssh {ssh_opts} {user}@{host} {command!r}"
     return subprocess.run(
         full_cmd,
         shell=True,
@@ -33,7 +50,8 @@ def ssh_cmd(host: str, user: str, command: str, check: bool = True) -> subproces
 
 def scp_cmd(src: str, dest: str) -> subprocess.CompletedProcess:
     """Copy a file via SCP."""
-    full_cmd = f"scp {SSH_OPTS} {src} {dest}"
+    ssh_opts = get_ssh_opts()
+    full_cmd = f"scp {ssh_opts} {src} {dest}"
     return subprocess.run(
         full_cmd,
         shell=True,
