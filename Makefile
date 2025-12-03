@@ -11,6 +11,9 @@ OCP_CLUSTER_VERSION ?=
 # Path to pull secret file (required for deploy)
 # Example: PULL_SECRET_PATH=/path/to/pull-secret.json
 PULL_SECRET_PATH ?=
+# Path to SSH private key file (optional, defaults to ~/.ssh/id_rsa etc.)
+# Example: SSH_KEY_PATH=/path/to/id_rsa
+SSH_KEY_PATH ?=
 # Timeout for waiting for cluster ready (seconds)
 WAIT_TIMEOUT ?= 3600
 
@@ -35,6 +38,13 @@ else
   PULL_SECRET_ARGS =
 endif
 
+# Build SSH key args if SSH_KEY_PATH is set
+ifdef SSH_KEY_PATH
+  SSH_KEY_ARGS = --ssh-key $(SSH_KEY_PATH)
+else
+  SSH_KEY_ARGS =
+endif
+
 # ============================================
 # SNO Cluster Management Targets
 # ============================================
@@ -49,13 +59,13 @@ endif
 ifndef PULL_SECRET_PATH
 	$(error PULL_SECRET_PATH is required. Usage: make sno-deploy OCP_CLUSTER_VERSION=4.20 PULL_SECRET_PATH=/path/to/secret.json)
 endif
-	python3 sno-deployer/main.py $(VERSION_ARGS) $(PULL_SECRET_ARGS) $(REMOTE_ARGS) --wait-timeout $(WAIT_TIMEOUT) deploy
+	python3 sno-deployer/main.py $(VERSION_ARGS) $(PULL_SECRET_ARGS) $(REMOTE_ARGS) $(SSH_KEY_ARGS) --wait-timeout $(WAIT_TIMEOUT) deploy
 
 # Delete SNO cluster (local or remote based on REMOTE_HOST)
 # Usage: make sno-delete
 # Usage: make sno-delete REMOTE_HOST=root@myhost.example.com
 sno-delete:
-	python3 sno-deployer/main.py $(REMOTE_ARGS) delete
+	python3 sno-deployer/main.py $(REMOTE_ARGS) $(SSH_KEY_ARGS) delete
 
 # Dry run deployment (local or remote based on REMOTE_HOST)
 # Usage: make sno-dry-run OCP_CLUSTER_VERSION=4.20 PULL_SECRET_PATH=/path/to/secret.json
@@ -66,7 +76,7 @@ endif
 ifndef PULL_SECRET_PATH
 	$(error PULL_SECRET_PATH is required. Usage: make sno-dry-run OCP_CLUSTER_VERSION=4.20 PULL_SECRET_PATH=/path/to/secret.json)
 endif
-	python3 sno-deployer/main.py $(VERSION_ARGS) $(PULL_SECRET_ARGS) $(REMOTE_ARGS) --dry-run deploy
+	python3 sno-deployer/main.py $(VERSION_ARGS) $(PULL_SECRET_ARGS) $(REMOTE_ARGS) $(SSH_KEY_ARGS) --dry-run deploy
 
 # Help target
 help:
@@ -81,6 +91,7 @@ help:
 	@echo "  OCP_CLUSTER_VERSION - OpenShift version to install (e.g., 4.20 or 4.20.6). REQUIRED for deploy."
 	@echo "  PULL_SECRET_PATH    - Path to pull secret file. REQUIRED for deploy."
 	@echo "  REMOTE_HOST         - Remote host in format user@host or host (default user: root)"
+	@echo "  SSH_KEY_PATH        - Path to SSH private key file (optional, uses default keys if not set)"
 	@echo "  WAIT_TIMEOUT        - Timeout for cluster ready in seconds (default: 3600)"
 
 .PHONY: test sno-deploy sno-delete sno-dry-run help

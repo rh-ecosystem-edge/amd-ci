@@ -55,6 +55,7 @@ Examples:
 Environment variables:
   OCP_CLUSTER_VERSION - OpenShift version to install (required for deploy)
   PULL_SECRET_PATH    - Path to pull secret file (required for deploy)
+  SSH_KEY_PATH        - Path to SSH private key for remote connections (optional)
   WAIT_TIMEOUT        - Max seconds to wait for cluster ready (default: 3600)
   NO_WAIT             - Set to 'true' to skip waiting for cluster ready
 """,
@@ -75,6 +76,12 @@ Environment variables:
         "--remote",
         metavar="[USER@]HOST",
         help="Remote libvirt host. Format: 'hostname' or 'user@hostname' (default user: root)",
+    )
+    parser.add_argument(
+        "--ssh-key",
+        dest="ssh_key",
+        default=os.environ.get("SSH_KEY_PATH"),
+        help="Path to SSH private key file for remote connections. (env: SSH_KEY_PATH)",
     )
     parser.add_argument(
         "--dry-run",
@@ -143,6 +150,7 @@ def main(argv: list[str] | None = None) -> int:
             remote_user=user,
             wait_timeout=args.wait_timeout,
             no_wait=no_wait,
+            ssh_key=args.ssh_key,
         )
         
     elif command == "delete":
@@ -154,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=args.dry_run,
             remote_host=host,
             remote_user=user,
+            ssh_key=args.ssh_key,
         )
         
     else:
