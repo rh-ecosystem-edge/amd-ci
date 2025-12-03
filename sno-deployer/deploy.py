@@ -7,13 +7,13 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from common import DeployError, run
 from kcli_preflight import ensure_kcli_installed, ensure_pull_secret_exists, ensure_kcli_config
 
 
-def build_kcli_params(params: Dict[str, str]) -> list[str]:
+def build_kcli_params(params: Dict[str, str]) -> List[str]:
     """
     Build kcli -P parameter arguments from params dict.
     
