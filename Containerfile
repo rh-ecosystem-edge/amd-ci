@@ -7,8 +7,8 @@ USER root
 # Copying oc binary
 COPY --from=oc-cli /usr/bin/oc /usr/bin/oc
 
-# Install Go and operator-sdk
-RUN apt-get update && apt-get install -y golang curl && apt-get clean
+# Install Go, make, and other build tools
+RUN apt-get update && apt-get install -y golang curl make && apt-get clean
 
 ARG OPERATOR_SDK_VERSION=v1.6.2
 RUN ARCH=$(case $(uname -m) in x86_64) echo -n amd64 ;; aarch64) echo -n arm64 ;; *) echo -n $(uname -m) ;; esac) && \
