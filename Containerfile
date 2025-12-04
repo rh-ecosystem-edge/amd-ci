@@ -1,6 +1,5 @@
 FROM quay.io/openshift/origin-cli:4.20 as oc-cli
-FROM quay.io/karmab/kcli:latest as kcli-cli
-FROM registry.access.redhat.com/ubi9/go-toolset:1.24.4
+FROM quay.io/karmab/kcli:latest
 
 LABEL org.opencontainers.image.authors="Red Hat Ecosystem Engineering"
 
@@ -8,12 +7,9 @@ USER root
 # Copying oc binary
 COPY --from=oc-cli /usr/bin/oc /usr/bin/oc
 
-# Copy kcli and its Python packages from the kcli image
-# The kcli image has all dependencies pre-installed
-COPY --from=kcli-cli /usr/local/bin/kcli /usr/local/bin/kcli
-COPY --from=kcli-cli /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+# Install Go and operator-sdk
+RUN apt-get update && apt-get install -y golang curl && apt-get clean
 
-# Install dependencies: `operator-sdk`
 ARG OPERATOR_SDK_VERSION=v1.6.2
 RUN ARCH=$(case $(uname -m) in x86_64) echo -n amd64 ;; aarch64) echo -n arm64 ;; *) echo -n $(uname -m) ;; esac) && \
     OS=$(uname | awk '{print tolower($0)}') && \
@@ -22,18 +18,11 @@ RUN ARCH=$(case $(uname -m) in x86_64) echo -n amd64 ;; aarch64) echo -n arm64 ;
     chmod +x operator-sdk_${OS}_${ARCH} && \
     mv operator-sdk_${OS}_${ARCH} /usr/local/bin/operator-sdk
 
-# Install dependencies for sno-deployer (SSH client for remote deployments)
-# python3.12 is needed for kcli (copied from kcli image which uses Python 3.12)
-RUN dnf install -y python3.12 python3.12-pip openssh-clients && \
-    ln -sf /usr/bin/python3.12 /usr/local/bin/python && \
-    ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
-    dnf clean all
-
 # Get the source code in there
 WORKDIR /root/amd-ci
 
 ENV GOCACHE=/root/amd-ci/tmp/
-ENV PATH="${PATH}:/opt/app-root/src/go/bin"
+ENV PATH="${PATH}:/root/go/bin"
 
 # Defaults we want the image to run with, can be overridden
 ARG ARTIFACT_DIR=/root/amd-ci/test-results
