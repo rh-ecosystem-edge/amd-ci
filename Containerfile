@@ -7,8 +7,11 @@ LABEL org.opencontainers.image.authors="Red Hat Ecosystem Engineering"
 USER root
 # Copying oc binary
 COPY --from=oc-cli /usr/bin/oc /usr/bin/oc
-# Copying kcli binary
+
+# Copy kcli and its Python packages from the kcli image
+# The kcli image has all dependencies pre-installed
 COPY --from=kcli-cli /usr/local/bin/kcli /usr/local/bin/kcli
+COPY --from=kcli-cli /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 
 # Install dependencies: `operator-sdk`
 ARG OPERATOR_SDK_VERSION=v1.6.2
@@ -20,7 +23,11 @@ RUN ARCH=$(case $(uname -m) in x86_64) echo -n amd64 ;; aarch64) echo -n arm64 ;
     mv operator-sdk_${OS}_${ARCH} /usr/local/bin/operator-sdk
 
 # Install dependencies for sno-deployer (SSH client for remote deployments)
-RUN dnf install -y python3-pip openssh-clients && dnf clean all
+# python3.12 is needed for kcli (copied from kcli image which uses Python 3.12)
+RUN dnf install -y python3.12 python3.12-pip openssh-clients && \
+    ln -sf /usr/bin/python3.12 /usr/local/bin/python && \
+    ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
+    dnf clean all
 
 # Get the source code in there
 WORKDIR /root/amd-ci
@@ -38,7 +45,7 @@ ENV DUMP_FAILED_TESTS=true
 COPY . .
 
 # Install sno-deployer Python dependencies
-RUN pip3 install -r sno-deployer/requirements.txt
+RUN python3 -m pip install -r sno-deployer/requirements.txt
 
 # RUN make install-ginkgo
 RUN mkdir -p "${ARTIFACT_DIR}" && chmod 777 "${ARTIFACT_DIR}"
