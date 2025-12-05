@@ -1,5 +1,6 @@
 FROM quay.io/openshift/origin-cli:4.20 as oc-cli
-FROM quay.io/karmab/kcli:latest
+FROM quay.io/karmab/kcli:latest as kcli-cli
+FROM registry.access.redhat.com/ubi9/go-toolset:1.24.4
 
 LABEL org.opencontainers.image.authors="Red Hat Ecosystem Engineering"
 
@@ -7,9 +8,7 @@ USER root
 # Copying oc binary
 COPY --from=oc-cli /usr/bin/oc /usr/bin/oc
 
-# Install Go, make, and other build tools
-RUN apt-get update && apt-get install -y golang curl make && apt-get clean
-
+# Install dependencies: `operator-sdk`
 ARG OPERATOR_SDK_VERSION=v1.6.2
 RUN ARCH=$(case $(uname -m) in x86_64) echo -n amd64 ;; aarch64) echo -n arm64 ;; *) echo -n $(uname -m) ;; esac) && \
     OS=$(uname | awk '{print tolower($0)}') && \
@@ -18,11 +17,24 @@ RUN ARCH=$(case $(uname -m) in x86_64) echo -n amd64 ;; aarch64) echo -n arm64 ;
     chmod +x operator-sdk_${OS}_${ARCH} && \
     mv operator-sdk_${OS}_${ARCH} /usr/local/bin/operator-sdk
 
+# Install dependencies for sno-deployer (SSH client for remote deployments)
+# python3.12 is required for kcli
+# We manually add the CentOS Stream CRB, BaseOS, and AppStream repositories to resolve all libvirt dependencies
+# We swap conflicting UBI packages with CentOS Stream versions before the main install to resolve the openssl-fips-provider conflict
+RUN echo -e '[centos-stream-crb]\nname=CentOS Stream 9 - CRB\nbaseurl=https://mirror.stream.centos.org/9-stream/CRB/x86_64/os/\ngpgcheck=0\nenabled=1\n\n[centos-stream-baseos]\nname=CentOS Stream 9 - BaseOS\nbaseurl=https://mirror.stream.centos.org/9-stream/BaseOS/x86_64/os/\ngpgcheck=0\nenabled=1\n\n[centos-stream-appstream]\nname=CentOS Stream 9 - AppStream\nbaseurl=https://mirror.stream.centos.org/9-stream/AppStream/x86_64/os/\ngpgcheck=0\nenabled=1' > /etc/yum.repos.d/centos-stream.repo && \
+    dnf swap -y openssl-fips-provider-so openssl-fips-provider --allowerasing && \
+    dnf install -y --allowerasing python3-pip python3.12 python3.12-pip openssh-clients make libvirt-devel gcc python3.12-devel pkgconf-pkg-config && \
+    ln -sf /usr/bin/python3.12 /usr/local/bin/python && \
+    dnf clean all
+
+# Install kcli and libvirt-python
+RUN python3.12 -m pip install kcli libvirt-python
+
 # Get the source code in there
 WORKDIR /root/amd-ci
 
 ENV GOCACHE=/root/amd-ci/tmp/
-ENV PATH="${PATH}:/root/go/bin"
+ENV PATH="${PATH}:/opt/app-root/src/go/bin"
 
 # Defaults we want the image to run with, can be overridden
 ARG ARTIFACT_DIR=/root/amd-ci/test-results
