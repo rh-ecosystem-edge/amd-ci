@@ -175,6 +175,7 @@ def _deploy_remote(
     kcli_cmd.extend(build_kcli_params(params))
     
     print(f"  kcli command: {' '.join(kcli_cmd)}")
+    print("\n  Starting kcli in background...")
     
     # Start kcli in background
     kcli_process = subprocess.Popen(
@@ -189,6 +190,17 @@ def _deploy_remote(
     vm_wait_timeout = 600
     vm_wait_start = time.time()
     while True:
+        # Check if kcli process died unexpectedly
+        if kcli_process.poll() is not None:
+            # Process finished, get its output
+            stdout, _ = kcli_process.communicate()
+            if kcli_process.returncode != 0:
+                print(f"\n✗ kcli process exited with code {kcli_process.returncode}")
+                print("kcli output:")
+                print(stdout)
+                raise DeployError(f"kcli deployment failed with exit code {kcli_process.returncode}")
+            # If it succeeded (exit 0), that's fine, continue waiting for VMs
+        
         result = run(["kcli", "-C", kcli_client, "list", "vm"], check=False, capture_output=True)
         vm_count = result.stdout.count(f"{cluster_name}-")
         
@@ -198,10 +210,19 @@ def _deploy_remote(
         
         elapsed = int(time.time() - vm_wait_start)
         if elapsed >= vm_wait_timeout:
-            kcli_process.terminate()
-            raise DeployError("Timeout waiting for VMs to be deployed")
+            # Get kcli output before failing
+            try:
+                kcli_process.terminate()
+                stdout, _ = kcli_process.communicate(timeout=5)
+                print("\nkcli output:")
+                print(stdout)
+            except:
+                pass
+            raise DeployError("Timeout waiting for VMs to be deployed (10 minutes)")
         
-        print(f"  Waiting for VMs... ({elapsed}s elapsed, found {vm_count} VMs)")
+        # Print status every 30 seconds or if we find VMs
+        if elapsed % 30 == 0 or vm_count > 0:
+            print(f"  Waiting for VMs... ({elapsed}s elapsed, found {vm_count} VMs)")
         time.sleep(10)
     
     # Show deployed VMs

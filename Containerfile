@@ -19,16 +19,18 @@ RUN ARCH=$(case $(uname -m) in x86_64) echo -n amd64 ;; aarch64) echo -n arm64 ;
 
 # Install dependencies for sno-deployer (SSH client for remote deployments)
 # python3.12 is required for kcli
+# genisoimage is required for kcli to create cloud-init ISOs
 # We manually add the CentOS Stream CRB, BaseOS, and AppStream repositories to resolve all libvirt dependencies
 # We swap conflicting UBI packages with CentOS Stream versions before the main install to resolve the openssl-fips-provider conflict
 RUN echo -e '[centos-stream-crb]\nname=CentOS Stream 9 - CRB\nbaseurl=https://mirror.stream.centos.org/9-stream/CRB/x86_64/os/\ngpgcheck=0\nenabled=1\n\n[centos-stream-baseos]\nname=CentOS Stream 9 - BaseOS\nbaseurl=https://mirror.stream.centos.org/9-stream/BaseOS/x86_64/os/\ngpgcheck=0\nenabled=1\n\n[centos-stream-appstream]\nname=CentOS Stream 9 - AppStream\nbaseurl=https://mirror.stream.centos.org/9-stream/AppStream/x86_64/os/\ngpgcheck=0\nenabled=1' > /etc/yum.repos.d/centos-stream.repo && \
     dnf swap -y openssl-fips-provider-so openssl-fips-provider --allowerasing && \
-    dnf install -y --allowerasing python3-pip python3.12 python3.12-pip openssh-clients make libvirt-devel gcc python3.12-devel pkgconf-pkg-config && \
+    dnf install -y --allowerasing python3-pip python3.12 python3.12-pip openssh-clients make libvirt-devel gcc python3.12-devel pkgconf-pkg-config genisoimage && \
     ln -sf /usr/bin/python3.12 /usr/local/bin/python && \
     dnf clean all
 
-# Install kcli and libvirt-python
-RUN python3.12 -m pip install kcli libvirt-python
+# Install kcli and libvirt-python for both python3.12 and system python3
+RUN python3.12 -m pip install kcli libvirt-python && \
+    python3 -m pip install kcli libvirt-python || true
 
 # Get the source code in there
 WORKDIR /root/amd-ci
@@ -51,6 +53,8 @@ RUN python3 -m pip install -r sno-deployer/requirements.txt
 # RUN make install-ginkgo
 RUN mkdir -p "${ARTIFACT_DIR}" && chmod 777 "${ARTIFACT_DIR}"
 RUN mkdir -p "${GOCACHE}" && chmod 777 "${GOCACHE}"
+# Make workspace writable for OpenShift's arbitrary user IDs
+# Note: SSH keys should NOT be in the image - they're mounted at runtime from secrets
 RUN chmod 777 /root/amd-ci -R
 ARG GPU_OPERATOR_VERSION=v23.9.1
 
