@@ -193,13 +193,28 @@ def setup_remote_libvirt(host: str, user: str) -> None:
     print("  Checking/creating default storage pool...")
     pool_check = ssh_cmd(host, user, "virsh -c qemu:///system pool-info default", check=False)
     if pool_check.returncode != 0:
+        # Pool doesn't exist, create it
         ssh_cmd(host, user, "mkdir -p /var/lib/libvirt/images")
-        ssh_cmd(host, user, "virsh -c qemu:///system pool-define-as default dir --target /var/lib/libvirt/images")
-        ssh_cmd(host, user, "virsh -c qemu:///system pool-start default")
-        ssh_cmd(host, user, "virsh -c qemu:///system pool-autostart default")
-        print("  Default storage pool created.")
+        # Try to define the pool, but ignore error if already defined
+        define_result = ssh_cmd(
+            host, user,
+            "virsh -c qemu:///system pool-define-as default dir --target /var/lib/libvirt/images",
+            check=False
+        )
+        if define_result.returncode != 0 and "already exists" not in define_result.stderr.lower():
+            raise DeployError(f"Failed to define storage pool: {define_result.stderr}")
+        print("  Default storage pool defined.")
     else:
         print("  Default storage pool already exists.")
+    
+    # Ensure pool is started (whether newly created or pre-existing)
+    start_result = ssh_cmd(host, user, "virsh -c qemu:///system pool-start default", check=False)
+    if start_result.returncode != 0 and "already active" not in start_result.stderr.lower():
+        raise DeployError(f"Failed to start storage pool: {start_result.stderr}")
+    
+    # Ensure pool is set to autostart
+    ssh_cmd(host, user, "virsh -c qemu:///system pool-autostart default", check=False)
+    print("  Storage pool ready.")
     
     # Verify libvirt is working
     result = ssh_cmd(host, user, "virsh -c qemu:///system list --all", check=False)
