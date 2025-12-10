@@ -1,4 +1,7 @@
 __pycache__/
-venv/
 *.pyc
+*.py[cod]
+*$py.class
+venv/
+*.log
 openshift-install
