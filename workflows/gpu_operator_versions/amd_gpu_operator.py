@@ -15,7 +15,7 @@ GITHUB_RELEASES_URL = f'https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB
 
 version_not_found = '0.0.0'
 
-def get_operator_versions(settings: Settings) -> dict:
+def get_operator_versions(settings: Settings) -> tuple[dict, dict]:
     """
     Fetch AMD GPU Operator versions from GitHub Releases.
     
@@ -23,20 +23,26 @@ def get_operator_versions(settings: Settings) -> dict:
     GitHub repository releases. It extracts version tags and groups them by
     minor version, keeping only the highest patch version for each.
     
+    Versions with only patch 0 (e.g., 1.5.0) are considered "pending" as we wish to ignore
+    them for now. They are tracked separately until a patch 1+ version is released.
+    
     Returns:
-        dict: Dictionary mapping minor versions to their highest patch version
+        tuple: (certified_versions, pending_versions)
+            - certified_versions: dict mapping minor versions to highest patch version (patch >= 1)
               Example: {'1.0': '1.0.5', '1.1': '1.1.2'}
+            - pending_versions: dict mapping minor versions to their patch 0 version (not yet certified)
+              Example: {'1.3': '1.3.0'}
     """
     
     return _get_versions_from_github_releases(settings)
 
 
-def _get_versions_from_github_releases(settings: Settings) -> dict:
+def _get_versions_from_github_releases(settings: Settings) -> tuple[dict, dict]:
     """
     Fetch versions from GitHub Releases API.
     
     Returns:
-        dict: Dictionary mapping minor versions to their highest patch version
+        tuple: (certified_versions, pending_versions)
     """
     
     logger.info(f'Fetching AMD GPU Operator releases from GitHub: {GITHUB_RELEASES_URL}')
@@ -71,7 +77,7 @@ def _get_versions_from_github_releases(settings: Settings) -> dict:
     return _parse_versions_from_tags(tags)
 
 
-def _parse_versions_from_tags(tags: list) -> dict:
+def _parse_versions_from_tags(tags: list) -> tuple[dict, dict]:
     """
     Parse version strings from GitHub release tags.
     
@@ -80,12 +86,16 @@ def _parse_versions_from_tags(tags: list) -> dict:
     - gpu-operator-charts-v1.3.1
     - v1.0.0, 1.0.0 (fallback for simpler formats)
     
+    Versions with only patch 0 are placed in pending_versions until a patch 1+
+    version is released.
+    
     Args:
         tags: List of release tag names from GitHub
         
     Returns:
-        dict: Dictionary mapping minor versions to highest patch versions
-              Example: {'1.4': '1.4.0', '1.3': '1.3.1'}
+        tuple: (certified_versions, pending_versions)
+            - certified_versions: dict mapping minor versions to highest patch versions (patch >= 1)
+            - pending_versions: dict mapping minor versions to their patch 0 version
     """
     
     # Match AMD GPU Operator release format: gpu-operator-charts-v1.4.0
@@ -93,7 +103,11 @@ def _parse_versions_from_tags(tags: list) -> dict:
     prog_full = re.compile(r'^gpu-operator-charts-v(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)$')
     prog_simple = re.compile(r'^v?(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)$')
     
-    versions = {}
+    # Track all versions and their highest patch
+    all_versions = {}
+    # Track whether each minor version has a non-zero patch
+    has_certified_patch = {}
+    
     for tag in tags:
         # Try full format first
         match = prog_full.match(tag)
@@ -112,10 +126,28 @@ def _parse_versions_from_tags(tags: list) -> dict:
         minor_key = f'{major}.{minor}'
         full_version = f'{major}.{minor}.{patch}'
         
-        existing = versions.get(minor_key, version_not_found)
-        versions[minor_key] = max_version(existing, full_version)
+        existing = all_versions.get(minor_key, version_not_found)
+        all_versions[minor_key] = max_version(existing, full_version)
+        
+        # Track if this minor version has any certified (non-zero) patch
+        if patch != '0':
+            has_certified_patch[minor_key] = True
     
-    logger.info(f'Parsed {len(versions)} unique minor versions from {len(tags)} tags')
-    logger.debug(f'Parsed versions: {versions}')
-    return versions
+    # Separate into certified and pending versions
+    certified_versions = {}
+    pending_versions = {}
+    
+    for minor_key, full_version in all_versions.items():
+        if has_certified_patch.get(minor_key, False):
+            # Has a certified patch version (>= 1)
+            certified_versions[minor_key] = full_version
+        else:
+            # Only has patch 0 - mark as pending
+            pending_versions[minor_key] = full_version
+            logger.info(f'Version {full_version} marked as pending (patch 0 only)')
+    
+    logger.info(f'Parsed {len(certified_versions)} certified and {len(pending_versions)} pending versions from {len(tags)} tags')
+    logger.debug(f'Certified versions: {certified_versions}')
+    logger.debug(f'Pending versions: {pending_versions}')
+    return certified_versions, pending_versions
 

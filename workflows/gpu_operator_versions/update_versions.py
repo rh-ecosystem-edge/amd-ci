@@ -18,32 +18,28 @@ def save_tests_commands(tests_commands: set, file_path: str):
             f.write(command + "\n")
 
 
-def create_tests_matrix(diffs: dict, ocp_releases: list, gpu_releases: list, all_gpu_releases: list = None) -> set:
+def create_tests_matrix(diffs: dict, ocp_releases: list, gpu_releases: list) -> set:
     """
     Create a test matrix based on version changes.
     
     This generates test combinations for:
-    - New OpenShift versions (tested against latest X GPU operator releases)
+    - New OpenShift versions (tested against GPU operator releases specified in gpu_releases)
     - New GPU operator versions (tested against all OpenShift versions)
     
     Args:
         diffs: Dictionary of detected changes
         ocp_releases: List of OpenShift release versions
-        gpu_releases: List of GPU operator release versions (latest X versions for new OCP tests)
-        all_gpu_releases: List of all GPU operator release versions (for validation)
+        gpu_releases: List of GPU operator release versions to test new OCP versions against
+                      (either all versions or latest X, depending on configuration)
         
     Returns:
         set: Set of test tuples (ocp_version, gpu_version)
     """
     tests = set()
-    
-    # Use gpu_releases for validation if all_gpu_releases not provided
-    if all_gpu_releases is None:
-        all_gpu_releases = gpu_releases
 
     if "ocp" in diffs:
         logger.info(f'OpenShift versions changed: {diffs["ocp"]}')
-        logger.info(f'Testing new OCP versions against {len(gpu_releases)} latest GPU operator versions: {gpu_releases}')
+        logger.info(f'Testing new OCP versions against {len(gpu_releases)} GPU operator versions: {gpu_releases}')
         for ocp_version in diffs["ocp"]:
             if ocp_version not in ocp_releases:
                 logger.warning(f'OpenShift version "{ocp_version}" is not in the list of releases: {list(ocp_releases)}. '
@@ -55,8 +51,8 @@ def create_tests_matrix(diffs: dict, ocp_releases: list, gpu_releases: list, all
         logger.info(f'AMD GPU operator versions changed: {diffs["gpu-operator"]}')
         logger.info(f'Testing new GPU operator versions against all {len(ocp_releases)} OCP versions')
         for gpu_version in diffs["gpu-operator"]:
-            if gpu_version not in all_gpu_releases:
-                logger.warning(f'AMD GPU operator version "{gpu_version}" is not in the list of releases: {list(all_gpu_releases)}. '
+            if gpu_version not in gpu_releases:
+                logger.warning(f'AMD GPU operator version "{gpu_version}" is not in the list of releases: {list(gpu_releases)}. '
                                f'This should not normally happen. Check if there was an update to an old version.')
                 continue
             for ocp_version in ocp_releases:
@@ -65,21 +61,20 @@ def create_tests_matrix(diffs: dict, ocp_releases: list, gpu_releases: list, all
     return tests
 
 
-def create_tests_commands(diffs: dict, ocp_releases: list, gpu_releases: list, all_gpu_releases: list = None) -> set:
+def create_tests_commands(diffs: dict, ocp_releases: list, gpu_releases: list) -> set:
     """
     Create test commands from the test matrix.
     
     Args:
         diffs: Dictionary of detected changes
         ocp_releases: List of OpenShift release versions
-        gpu_releases: List of GPU operator release versions (latest X versions for new OCP tests)
-        all_gpu_releases: List of all GPU operator release versions (for validation)
+        gpu_releases: List of GPU operator release versions to test new OCP versions against
         
     Returns:
         set: Set of test command strings
     """
     tests_commands = set()
-    tests = create_tests_matrix(diffs, ocp_releases, gpu_releases, all_gpu_releases)
+    tests = create_tests_matrix(diffs, ocp_releases, gpu_releases)
     for t in tests:
         gpu_version_suffix = version2suffix(t[1])
         tests_commands.add(test_command_template.format(ocp_version=t[0], gpu_version=gpu_version_suffix))
@@ -122,7 +117,7 @@ def main():
     Main function to detect version changes and generate test commands.
     
     Process:
-    1. Fetch current AMD GPU operator versions
+    1. Fetch current AMD GPU operator versions (certified and pending)
     2. Fetch current OpenShift versions
     3. Load previously stored versions
     4. Calculate differences
@@ -136,17 +131,18 @@ def main():
     
     # Fetch current versions
     logger.info('Fetching AMD GPU operator versions...')
-    gpu_versions = get_operator_versions(settings)
+    gpu_versions, gpu_pending_versions = get_operator_versions(settings)
     
     logger.info('Fetching OpenShift versions...')
     ocp_versions = fetch_ocp_versions(settings)
 
     new_versions = {
         "gpu-operator": gpu_versions,
+        "gpu-operator-pending": gpu_pending_versions,
         "ocp": ocp_versions
     }
     
-    logger.info(f'Fetched versions: OCP={len(ocp_versions)}, GPU={len(gpu_versions)}')
+    logger.info(f'Fetched versions: OCP={len(ocp_versions)}, GPU={len(gpu_versions)} certified, {len(gpu_pending_versions)} pending')
 
     # Load old versions and update file
     with open(settings.version_file_path, "r+") as json_f:
@@ -168,13 +164,22 @@ def main():
     # Generate test commands
     ocp_releases = list(ocp_versions.keys())
     all_gpu_releases = list(gpu_versions.keys())
-    # For new OCP versions, test only the latest X GPU operator versions (configurable)
-    gpu_releases = get_latest_versions(all_gpu_releases, settings.gpu_versions_to_test_count)
+    
+    # Determine GPU releases to test new OCP versions against
+    # Default: Test against ALL GPU operator versions
+    # If GPU_VERSIONS_TO_TEST_COUNT env var is set: Test against only the latest X versions
+    if settings.gpu_versions_to_test_count is not None:
+        gpu_releases_for_ocp = get_latest_versions(all_gpu_releases, settings.gpu_versions_to_test_count)
+        logger.info(f'GPU_VERSIONS_TO_TEST_COUNT={settings.gpu_versions_to_test_count} - '
+                    f'new OCP versions will be tested against {len(gpu_releases_for_ocp)} latest GPU releases: {gpu_releases_for_ocp}')
+    else:
+        gpu_releases_for_ocp = all_gpu_releases
+        logger.info(f'GPU_VERSIONS_TO_TEST_COUNT not set - '
+                    f'new OCP versions will be tested against ALL {len(gpu_releases_for_ocp)} GPU releases')
     
     logger.info(f'Generating tests for {len(ocp_releases)} OCP releases')
-    logger.info(f'New OCP versions will be tested against {len(gpu_releases)} latest GPU releases: {gpu_releases}')
     logger.info(f'New GPU versions will be tested against all {len(ocp_releases)} OCP releases')
-    tests_commands = create_tests_commands(diffs, ocp_releases, gpu_releases, all_gpu_releases)
+    tests_commands = create_tests_commands(diffs, ocp_releases, gpu_releases_for_ocp)
     
     logger.info(f'Generated {len(tests_commands)} test commands')
     save_tests_commands(tests_commands, settings.tests_to_trigger_file_path)
