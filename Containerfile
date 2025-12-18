@@ -47,8 +47,9 @@ ENV DUMP_FAILED_TESTS=true
 
 COPY . .
 
-# Install sno-deployer Python dependencies
-RUN python3 -m pip install -r sno-deployer/requirements.txt
+# Install Python dependencies
+RUN python3 -m pip install -r sno-deployer/requirements.txt && \
+    python3 -m pip install -r workflows/gpu_operator_versions/requirements.txt
 
 # RUN make install-ginkgo
 RUN mkdir -p "${ARTIFACT_DIR}" && chmod 777 "${ARTIFACT_DIR}"
