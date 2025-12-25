@@ -1,5 +1,5 @@
 test:
-	./tests/yes.sh
+	PYTHONPATH=. python3 -m unittest discover -s workflows/gpu_operator_versions/tests -v
 
 # SNO cluster management
 # Remote host in format: user@host or just host (defaults to root@host)
