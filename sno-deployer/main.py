@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 
 from config import get_kcli_params, print_config, CLUSTER_NAME
@@ -56,6 +57,7 @@ Environment variables:
   OCP_CLUSTER_VERSION - OpenShift version to install (required for deploy)
   PULL_SECRET_PATH    - Path to pull secret file (required for deploy)
   SSH_KEY_PATH        - Path to SSH private key for remote connections (optional)
+  PCI_DEVICES         - Comma or space-separated PCI device addresses for passthrough (optional)
   WAIT_TIMEOUT        - Max seconds to wait for cluster ready (default: 3600)
   NO_WAIT             - Set to 'true' to skip waiting for cluster ready
 """,
@@ -99,6 +101,13 @@ Environment variables:
         default=int(os.environ.get("WAIT_TIMEOUT", "3600")),
         help="Timeout in seconds waiting for cluster ready (default: 3600, env: WAIT_TIMEOUT)",
     )
+    parser.add_argument(
+        "--pci-device",
+        dest="pci_devices",
+        action="append",
+        default=None,
+        help="PCI device address for passthrough (e.g., 0000:b3:00.0). Can be specified multiple times. (env: PCI_DEVICES)",
+    )
 
     subparsers = parser.add_subparsers(dest="command", help="Action to perform")
     
@@ -137,16 +146,27 @@ def main(argv: list[str] | None = None) -> int:
         ocp_version = args.ocp_version
         ocp_version = update_version_to_latest_patch(ocp_version)
         
+        # Get PCI devices from args or environment
+        pci_devices = args.pci_devices
+        if not pci_devices:
+            env_pci = os.environ.get("PCI_DEVICES", "")
+            if env_pci:
+                # Support both comma and space delimiters
+                pci_devices = [d.strip() for d in re.split(r"[,\s]+", env_pci) if d.strip()]
+        
         # Build parameters from config + CLI args
         params = get_kcli_params(tag=ocp_version, pull_secret=args.pull_secret)
         
         # Print configuration
         print_config(params)
+        if pci_devices:
+            print(f"PCI Passthrough Devices: {pci_devices}")
         
         deploy_sno(
             params=params,
             dry_run=args.dry_run,
             remote_host=host,
+            pci_devices=pci_devices,
             remote_user=user,
             wait_timeout=args.wait_timeout,
             no_wait=no_wait,

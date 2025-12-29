@@ -34,6 +34,7 @@ def deploy_sno(
     wait_timeout: int = 3600,
     no_wait: bool = False,
     ssh_key: Optional[str] = None,
+    pci_devices: Optional[List[str]] = None,
 ) -> None:
     """
     Main deployment flow, driven by the kcli parameters.
@@ -46,6 +47,7 @@ def deploy_sno(
         wait_timeout: Timeout in seconds for cluster ready (remote only)
         no_wait: Skip waiting for cluster ready (remote only)
         ssh_key: Path to SSH private key file (optional)
+        pci_devices: List of PCI device addresses for passthrough (e.g., ["0000:b3:00.0"])
     """
     ensure_kcli_installed()
     
@@ -79,6 +81,7 @@ def deploy_sno(
             wait_timeout=wait_timeout,
             no_wait=no_wait,
             ssh_key=ssh_key,
+            pci_devices=pci_devices,
         )
     else:
         _deploy_local(
@@ -117,6 +120,7 @@ def _deploy_remote(
     wait_timeout: int,
     no_wait: bool,
     ssh_key: Optional[str] = None,
+    pci_devices: Optional[List[str]] = None,
 ) -> None:
     """Deploy SNO cluster on a remote libvirt host."""
     from remote import (
@@ -127,6 +131,7 @@ def _deploy_remote(
         get_cluster_status,
         print_access_instructions,
         set_ssh_key_path,
+        attach_pci_devices,
     )
     
     # Configure SSH key if provided
@@ -228,6 +233,12 @@ def _deploy_remote(
     # Show deployed VMs
     print("\nVMs on remote host:")
     run(["kcli", "-C", kcli_client, "list", "vm"], check=False)
+    
+    # Attach PCI devices if specified
+    if pci_devices:
+        print("\nStep 5b: Attaching PCI devices to control plane VM...")
+        ctlplane_vm = f"{cluster_name}-ctlplane-0"
+        attach_pci_devices(remote_host, remote_user, ctlplane_vm, pci_devices)
     
     # Setup remote cluster access
     print("\nStep 6: Setting up remote cluster access...")
