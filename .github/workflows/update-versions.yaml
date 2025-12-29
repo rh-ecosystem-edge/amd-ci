@@ -16,7 +16,7 @@ on:
         description: 'Number of latest GPU versions to test new OCP against (leave empty for all)'
         required: false
         type: string
-        default: ''
+        default: '2'
 jobs:
   ocp-version:
     if: github.event_name != 'schedule' || github.repository == 'rh-ecosystem-edge/amd-ci' || vars.VERSION_UPDATE_FLOW_ENABLE_SCHEDULED == 'true'
@@ -47,7 +47,7 @@ jobs:
           OCP_IGNORED_VERSIONS_REGEX: "^4\\.(7|8|9|10|11|12|13|14|15)(\\.|$)|^4\\.19\\.0-rc\\.0$|^4\\.18\\.22$"
           VERSION_FILE_PATH: "workflows/gpu_operator_versions/versions.json"
           TEST_TO_TRIGGER_FILE_PATH: "workflows/generated-files/tests_to_trigger.txt"
-          GPU_VERSIONS_TO_TEST_COUNT: ${{ inputs.gpu_versions_to_test_count }}
+          GPU_VERSIONS_TO_TEST_COUNT: ${{ inputs.gpu_versions_to_test_count || '2' }}
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v7
         with:
