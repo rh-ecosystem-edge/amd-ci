@@ -14,8 +14,9 @@ class Settings:
         self.tests_to_trigger_file_path = os.getenv("TEST_TO_TRIGGER_FILE_PATH")
         self.request_timeout_sec = int(os.getenv("REQUEST_TIMEOUT_SECONDS", 30))
         
-        # GPU_VERSIONS_TO_TEST_COUNT: Optional parameter to limit GPU versions for new OCP tests
-        # - If not set or empty: Test against ALL GPU operator versions (default)
+        # GPU_VERSIONS_TO_TEST_COUNT: Parameter to limit GPU versions for new OCP tests
+        # - TEMPORARY: Default of 2 is set in the workflow YAML (test against latest 2 GPU versions)
+        # - To revert: remove the || '2' fallback in the YAML file
         # - If set to a positive integer X: Test against only the latest X GPU operator versions
         gpu_count_env = os.getenv("GPU_VERSIONS_TO_TEST_COUNT", "").strip()
         if gpu_count_env:
