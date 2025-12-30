@@ -14,6 +14,9 @@ PULL_SECRET_PATH ?=
 # Path to SSH private key file (optional, defaults to ~/.ssh/id_rsa etc.)
 # Example: SSH_KEY_PATH=/path/to/id_rsa
 SSH_KEY_PATH ?=
+# PCI devices for passthrough (space-separated for multiple devices)
+# Example: PCI_DEVICES=0000:b3:00.0 or PCI_DEVICES="0000:b3:00.0 0000:b3:00.1"
+PCI_DEVICES ?=
 # Timeout for waiting for cluster ready (seconds)
 WAIT_TIMEOUT ?= 3600
 
@@ -45,6 +48,14 @@ else
   SSH_KEY_ARGS =
 endif
 
+# Build PCI device args if PCI_DEVICES is set
+# Supports multiple devices: PCI_DEVICES="0000:b3:00.0 0000:b3:00.1"
+ifdef PCI_DEVICES
+  PCI_DEVICE_ARGS = $(foreach dev,$(PCI_DEVICES),--pci-device $(dev))
+else
+  PCI_DEVICE_ARGS =
+endif
+
 # ============================================
 # SNO Cluster Management Targets
 # ============================================
@@ -59,7 +70,7 @@ endif
 ifndef PULL_SECRET_PATH
 	$(error PULL_SECRET_PATH is required. Usage: make sno-deploy OCP_CLUSTER_VERSION=4.20 PULL_SECRET_PATH=/path/to/secret.json)
 endif
-	python3 sno-deployer/main.py $(VERSION_ARGS) $(PULL_SECRET_ARGS) $(REMOTE_ARGS) $(SSH_KEY_ARGS) --wait-timeout $(WAIT_TIMEOUT) deploy
+	python3 sno-deployer/main.py $(VERSION_ARGS) $(PULL_SECRET_ARGS) $(REMOTE_ARGS) $(SSH_KEY_ARGS) $(PCI_DEVICE_ARGS) --wait-timeout $(WAIT_TIMEOUT) deploy
 
 # Delete SNO cluster (local or remote based on REMOTE_HOST)
 # Usage: make sno-delete
@@ -76,7 +87,7 @@ endif
 ifndef PULL_SECRET_PATH
 	$(error PULL_SECRET_PATH is required. Usage: make sno-dry-run OCP_CLUSTER_VERSION=4.20 PULL_SECRET_PATH=/path/to/secret.json)
 endif
-	python3 sno-deployer/main.py $(VERSION_ARGS) $(PULL_SECRET_ARGS) $(REMOTE_ARGS) $(SSH_KEY_ARGS) --dry-run deploy
+	python3 sno-deployer/main.py $(VERSION_ARGS) $(PULL_SECRET_ARGS) $(REMOTE_ARGS) $(SSH_KEY_ARGS) $(PCI_DEVICE_ARGS) --dry-run deploy
 
 # Help target
 help:
@@ -92,6 +103,7 @@ help:
 	@echo "  PULL_SECRET_PATH    - Path to pull secret file. REQUIRED for deploy."
 	@echo "  REMOTE_HOST         - Remote host in format user@host or host (default user: root)"
 	@echo "  SSH_KEY_PATH        - Path to SSH private key file (optional, uses default keys if not set)"
+	@echo "  PCI_DEVICES         - PCI devices for passthrough (e.g., '0000:b3:00.0' or '0000:b3:00.0 0000:b3:00.1')"
 	@echo "  WAIT_TIMEOUT        - Timeout for cluster ready in seconds (default: 3600)"
 
 .PHONY: test sno-deploy sno-delete sno-dry-run help

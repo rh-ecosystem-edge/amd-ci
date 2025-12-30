@@ -7,6 +7,7 @@ Reference: https://kcli.readthedocs.io/en/latest/#prerequisites
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 import stat
@@ -589,3 +590,123 @@ To delete the cluster:
 {'='*60}
 """)
 
+
+def attach_pci_devices(
+    host: str,
+    user: str,
+    vm_name: str,
+    pci_devices: list[str],
+) -> None:
+    """
+    Attach PCI devices to a VM for GPU passthrough.
+    
+    This function:
+    1. Shuts down the VM gracefully
+    2. Attaches each PCI device via virsh
+    3. Starts the VM back up
+    
+    Args:
+        host: Remote host IP/hostname
+        user: SSH user
+        vm_name: Name of the VM (e.g., "sno-ctlplane-0")
+        pci_devices: List of PCI addresses (e.g., ["0000:b3:00.0"])
+    """
+    print(f"Attaching {len(pci_devices)} PCI device(s) to VM '{vm_name}'...")
+    
+    # Verify VM exists
+    vm_state = ssh_cmd(host, user, f"virsh domstate {vm_name}", check=False)
+    if vm_state.returncode != 0 or "no state" in vm_state.stderr.lower():
+        raise DeployError(f"VM '{vm_name}' not found on {host}. Cannot attach PCI devices.")
+    
+    was_running = "running" in vm_state.stdout.lower()
+    
+    if was_running:
+        print(f"  Shutting down VM '{vm_name}'...")
+        ssh_cmd(host, user, f"virsh shutdown {vm_name}", check=False)
+        
+        # Wait for VM to shut down (max 120 seconds)
+        for i in range(24):
+            time.sleep(5)
+            state = ssh_cmd(host, user, f"virsh domstate {vm_name}", check=False)
+            if "shut off" in state.stdout.lower():
+                print("  VM shut down successfully.")
+                break
+            if i == 23:
+                print("  Force stopping VM...")
+                ssh_cmd(host, user, f"virsh destroy {vm_name}", check=False)
+                time.sleep(2)
+    
+    # Attach each PCI device
+    for pci_addr in pci_devices:
+        print(f"  Attaching PCI device: {pci_addr}")
+        
+        # Parse PCI address: 0000:b3:00.0 -> domain=0x0000, bus=0xb3, slot=0x00, function=0x0
+        parts = pci_addr.replace(":", " ").replace(".", " ").split()
+        if len(parts) != 4:
+            raise DeployError(f"Invalid PCI address format: {pci_addr}. Expected format: 0000:XX:YY.Z")
+        
+        domain, bus, slot, function = parts
+        
+        # Validate hex format
+        try:
+            for part in (domain, bus, slot, function):
+                int(part, 16)
+        except ValueError as err:
+            raise DeployError(
+                f"Invalid PCI address: {pci_addr}. Components must be valid hexadecimal values."
+            ) from err
+        
+        # Create hostdev XML and write to remote host
+        # Use base64 encoding to avoid shell quoting issues
+        xml_file = f"/tmp/pci-{pci_addr.replace(':', '-').replace('.', '-')}.xml"
+        xml_content = (
+            f"<hostdev mode='subsystem' type='pci' managed='yes'>"
+            f"<source>"
+            f"<address domain='0x{domain}' bus='0x{bus}' slot='0x{slot}' function='0x{function}'/>"
+            f"</source>"
+            f"</hostdev>"
+        )
+        # Base64 encode to avoid quoting issues
+        xml_b64 = base64.b64encode(xml_content.encode()).decode()
+        ssh_cmd(host, user, f"echo {xml_b64} | base64 -d > {xml_file}", check=True)
+        
+        # Attach device to VM (persistent config)
+        result = ssh_cmd(host, user, f"virsh attach-device {vm_name} {xml_file} --config", check=False)
+        if result.returncode != 0:
+            if "already exists" in result.stderr.lower() or "already attached" in result.stderr.lower():
+                print(f"    Device {pci_addr} already attached.")
+            else:
+                raise DeployError(f"Failed to attach PCI device {pci_addr}: {result.stderr}")
+        else:
+            print(f"    ✓ Device {pci_addr} attached.")
+        
+        # Clean up temp file
+        ssh_cmd(host, user, f"rm -f {xml_file}", check=False)
+    
+    # Verify devices are attached
+    print("  Verifying PCI devices in VM config...")
+    result = ssh_cmd(host, user, f"virsh dumpxml {vm_name} | grep -c hostdev", check=False)
+    hostdev_count = int(result.stdout.strip()) if result.stdout.strip().isdigit() else 0
+    print(f"    Found {hostdev_count} hostdev entries in VM config.")
+    
+    # Start VM back up
+    print(f"  Starting VM '{vm_name}'...")
+    ssh_cmd(host, user, f"virsh start {vm_name}", check=True)
+    
+    # Wait for VM to be running
+    vm_started = False
+    for _ in range(12):
+        time.sleep(5)
+        state = ssh_cmd(host, user, f"virsh domstate {vm_name}", check=False)
+        if "running" in state.stdout.lower():
+            print(f"  ✓ VM '{vm_name}' is running with PCI passthrough enabled.")
+            vm_started = True
+            break
+    
+    if not vm_started:
+        raise DeployError(
+            f"VM '{vm_name}' failed to start after PCI device attachment. "
+            f"Check 'virsh dumpxml {vm_name}' and system logs for IOMMU/passthrough issues."
+        )
+    
+    print("PCI device attachment complete.")
