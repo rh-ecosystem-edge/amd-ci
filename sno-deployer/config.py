@@ -14,7 +14,9 @@ NETWORK = "default"
 CTLPLANES = 1
 WORKERS = 0
 CTLPLANE_MEMORY = 18432  # MB
-CTLPLANE_NUMCPUS = 4
+CTLPLANE_NUMCPUS = 6  # Minimum 6 vCPUs for KMM, AMD GPU Operator, and NFD Operator
+WORKER_MEMORY = 16384  # MB
+WORKER_NUMCPUS = 4
 DISK_SIZE = 120  # GB
 
 # Network configuration
@@ -24,13 +26,20 @@ API_IP = "192.168.122.253"
 VERSION_CHANNEL = "stable"
 
 
-def get_kcli_params(tag: str, pull_secret: str) -> dict:
+def get_kcli_params(
+    tag: str,
+    pull_secret: str,
+    ctlplane_numcpus: int | None = None,
+    worker_numcpus: int | None = None,
+) -> dict:
     """
     Build the kcli parameters dictionary.
     
     Args:
         tag: OpenShift version (e.g., "4.20" or "4.20.6")
         pull_secret: Path to pull secret file
+        ctlplane_numcpus: Number of vCPUs for control plane (defaults to CTLPLANE_NUMCPUS)
+        worker_numcpus: Number of vCPUs for worker nodes (defaults to WORKER_NUMCPUS)
         
     Returns:
         Dictionary of kcli parameters
@@ -42,7 +51,9 @@ def get_kcli_params(tag: str, pull_secret: str) -> dict:
         "ctlplanes": CTLPLANES,
         "workers": WORKERS,
         "ctlplane_memory": CTLPLANE_MEMORY,
-        "ctlplane_numcpus": CTLPLANE_NUMCPUS,
+        "ctlplane_numcpus": ctlplane_numcpus if ctlplane_numcpus is not None else CTLPLANE_NUMCPUS,
+        "worker_memory": WORKER_MEMORY,
+        "worker_numcpus": worker_numcpus if worker_numcpus is not None else WORKER_NUMCPUS,
         "disk_size": DISK_SIZE,
         "tag": tag,
         "pull_secret": pull_secret,
