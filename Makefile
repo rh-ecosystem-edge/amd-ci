@@ -17,6 +17,10 @@ SSH_KEY_PATH ?=
 # PCI devices for passthrough (space-separated for multiple devices)
 # Example: PCI_DEVICES=0000:b3:00.0 or PCI_DEVICES="0000:b3:00.0 0000:b3:00.1"
 PCI_DEVICES ?=
+# Number of vCPUs per control plane node (minimum 6 for KMM, AMD GPU Operator, NFD)
+CTLPLANE_NUMCPUS ?=
+# Number of vCPUs per worker node
+WORKER_NUMCPUS ?=
 # Timeout for waiting for cluster ready (seconds)
 WAIT_TIMEOUT ?= 3600
 
@@ -56,6 +60,19 @@ else
   PCI_DEVICE_ARGS =
 endif
 
+# Build CPU args if set
+ifdef CTLPLANE_NUMCPUS
+  CTLPLANE_NUMCPUS_ARGS = --ctlplane-numcpus $(CTLPLANE_NUMCPUS)
+else
+  CTLPLANE_NUMCPUS_ARGS =
+endif
+
+ifdef WORKER_NUMCPUS
+  WORKER_NUMCPUS_ARGS = --worker-numcpus $(WORKER_NUMCPUS)
+else
+  WORKER_NUMCPUS_ARGS =
+endif
+
 # ============================================
 # SNO Cluster Management Targets
 # ============================================
@@ -70,7 +87,7 @@ endif
 ifndef PULL_SECRET_PATH
 	$(error PULL_SECRET_PATH is required. Usage: make sno-deploy OCP_CLUSTER_VERSION=4.20 PULL_SECRET_PATH=/path/to/secret.json)
 endif
-	python3 sno-deployer/main.py $(VERSION_ARGS) $(PULL_SECRET_ARGS) $(REMOTE_ARGS) $(SSH_KEY_ARGS) $(PCI_DEVICE_ARGS) --wait-timeout $(WAIT_TIMEOUT) deploy
+	python3 sno-deployer/main.py $(VERSION_ARGS) $(PULL_SECRET_ARGS) $(REMOTE_ARGS) $(SSH_KEY_ARGS) $(PCI_DEVICE_ARGS) $(CTLPLANE_NUMCPUS_ARGS) $(WORKER_NUMCPUS_ARGS) --wait-timeout $(WAIT_TIMEOUT) deploy
 
 # Delete SNO cluster (local or remote based on REMOTE_HOST)
 # Usage: make sno-delete
@@ -87,7 +104,7 @@ endif
 ifndef PULL_SECRET_PATH
 	$(error PULL_SECRET_PATH is required. Usage: make sno-dry-run OCP_CLUSTER_VERSION=4.20 PULL_SECRET_PATH=/path/to/secret.json)
 endif
-	python3 sno-deployer/main.py $(VERSION_ARGS) $(PULL_SECRET_ARGS) $(REMOTE_ARGS) $(SSH_KEY_ARGS) $(PCI_DEVICE_ARGS) --dry-run deploy
+	python3 sno-deployer/main.py $(VERSION_ARGS) $(PULL_SECRET_ARGS) $(REMOTE_ARGS) $(SSH_KEY_ARGS) $(PCI_DEVICE_ARGS) $(CTLPLANE_NUMCPUS_ARGS) $(WORKER_NUMCPUS_ARGS) --dry-run deploy
 
 # Help target
 help:
@@ -104,6 +121,8 @@ help:
 	@echo "  REMOTE_HOST         - Remote host in format user@host or host (default user: root)"
 	@echo "  SSH_KEY_PATH        - Path to SSH private key file (optional, uses default keys if not set)"
 	@echo "  PCI_DEVICES         - PCI devices for passthrough (e.g., '0000:b3:00.0' or '0000:b3:00.0 0000:b3:00.1')"
+	@echo "  CTLPLANE_NUMCPUS    - vCPUs per control plane node (min for KMM/GPU/NFD operators)"
+	@echo "  WORKER_NUMCPUS      - vCPUs per worker node"
 	@echo "  WAIT_TIMEOUT        - Timeout for cluster ready in seconds (default: 3600)"
 
 .PHONY: test sno-deploy sno-delete sno-dry-run help

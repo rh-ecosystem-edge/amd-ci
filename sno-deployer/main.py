@@ -58,6 +58,8 @@ Environment variables:
   PULL_SECRET_PATH    - Path to pull secret file (required for deploy)
   SSH_KEY_PATH        - Path to SSH private key for remote connections (optional)
   PCI_DEVICES         - Comma or space-separated PCI device addresses for passthrough (optional)
+  CTLPLANE_NUMCPUS    - Number of vCPUs per control plane node (default: 6)
+  WORKER_NUMCPUS      - Number of vCPUs per worker node (default: 4)
   WAIT_TIMEOUT        - Max seconds to wait for cluster ready (default: 3600)
   NO_WAIT             - Set to 'true' to skip waiting for cluster ready
 """,
@@ -108,6 +110,20 @@ Environment variables:
         default=None,
         help="PCI device address for passthrough (e.g., 0000:b3:00.0). Can be specified multiple times. (env: PCI_DEVICES)",
     )
+    parser.add_argument(
+        "--ctlplane-numcpus",
+        dest="ctlplane_numcpus",
+        type=int,
+        default=None,
+        help="Number of vCPUs per control plane node (default: 6). (env: CTLPLANE_NUMCPUS)",
+    )
+    parser.add_argument(
+        "--worker-numcpus",
+        dest="worker_numcpus",
+        type=int,
+        default=None,
+        help="Number of vCPUs per worker node (default: 4). (env: WORKER_NUMCPUS)",
+    )
 
     subparsers = parser.add_subparsers(dest="command", help="Action to perform")
     
@@ -154,8 +170,26 @@ def main(argv: list[str] | None = None) -> int:
                 # Support both comma and space delimiters
                 pci_devices = [d.strip() for d in re.split(r"[,\s]+", env_pci) if d.strip()]
         
+        # Get CPU counts from args or environment
+        ctlplane_numcpus = args.ctlplane_numcpus
+        if ctlplane_numcpus is None:
+            env_ctlplane_numcpus = os.environ.get("CTLPLANE_NUMCPUS", "")
+            if env_ctlplane_numcpus:
+                ctlplane_numcpus = int(env_ctlplane_numcpus)
+        
+        worker_numcpus = args.worker_numcpus
+        if worker_numcpus is None:
+            env_worker_numcpus = os.environ.get("WORKER_NUMCPUS", "")
+            if env_worker_numcpus:
+                worker_numcpus = int(env_worker_numcpus)
+        
         # Build parameters from config + CLI args
-        params = get_kcli_params(tag=ocp_version, pull_secret=args.pull_secret)
+        params = get_kcli_params(
+            tag=ocp_version,
+            pull_secret=args.pull_secret,
+            ctlplane_numcpus=ctlplane_numcpus,
+            worker_numcpus=worker_numcpus,
+        )
         
         # Print configuration
         print_config(params)
