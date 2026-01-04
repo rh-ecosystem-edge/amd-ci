@@ -17,7 +17,7 @@ RUN ARCH=$(case $(uname -m) in x86_64) echo -n amd64 ;; aarch64) echo -n arm64 ;
     chmod +x operator-sdk_${OS}_${ARCH} && \
     mv operator-sdk_${OS}_${ARCH} /usr/local/bin/operator-sdk
 
-# Install dependencies for sno-deployer (SSH client for remote deployments)
+# Install dependencies for cluster-provision (SSH client for remote deployments)
 # python3.12 is required for kcli
 # genisoimage is required for kcli to create cloud-init ISOs
 # We manually add the CentOS Stream CRB, BaseOS, and AppStream repositories to resolve all libvirt dependencies
@@ -48,7 +48,7 @@ ENV DUMP_FAILED_TESTS=true
 COPY . .
 
 # Install Python dependencies
-RUN python3 -m pip install -r sno-deployer/requirements.txt && \
+RUN python3 -m pip install -r cluster-provision/requirements.txt && \
     python3 -m pip install -r workflows/gpu_operator_versions/requirements.txt
 
 # RUN make install-ginkgo

@@ -1,15 +1,17 @@
 """
-Deploy Single Node OpenShift (SNO) cluster using kcli.
+Deploy OpenShift cluster using kcli.
 Supports both local and remote libvirt hosts.
+Default topology is SNO (Single Node OpenShift): 1 control plane, 0 workers.
 """
 
 import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from common import DeployError, run
+from config import get_cluster_topology_description
 from kcli_preflight import ensure_kcli_installed, ensure_pull_secret_exists, ensure_kcli_config
 
 
@@ -26,8 +28,8 @@ def build_kcli_params(params: Dict[str, str]) -> List[str]:
     return args
 
 
-def deploy_sno(
-    params: Dict[str, str],
+def deploy_cluster(
+    params: Dict[str, Any],
     dry_run: bool = False,
     remote_host: Optional[str] = None,
     remote_user: str = "root",
@@ -51,9 +53,11 @@ def deploy_sno(
     """
     ensure_kcli_installed()
     
-    cluster_name = params.get("cluster", "sno")
+    cluster_name = params.get("cluster", "ocp")
     api_ip = params.get("api_ip", "192.168.122.253")
     domain = params.get("domain", "example.com")
+    ctlplanes = int(params.get("ctlplanes", 1))
+    workers = int(params.get("workers", 0))
 
     # Remove existing kcli cluster artifacts directory, if present
     clusters_dir = Path.home() / ".kcli" / "clusters" / cluster_name
@@ -75,6 +79,8 @@ def deploy_sno(
             cluster_name=cluster_name,
             api_ip=api_ip,
             domain=domain,
+            ctlplanes=ctlplanes,
+            workers=workers,
             remote_host=remote_host,
             remote_user=remote_user,
             dry_run=dry_run,
@@ -86,13 +92,17 @@ def deploy_sno(
     else:
         _deploy_local(
             params=params,
+            ctlplanes=ctlplanes,
+            workers=workers,
             dry_run=dry_run,
         )
 
 
-def _deploy_local(params: Dict[str, str], dry_run: bool) -> None:
-    """Deploy SNO cluster locally."""
+def _deploy_local(params: Dict[str, Any], ctlplanes: int, workers: int, dry_run: bool) -> None:
+    """Deploy OpenShift cluster locally."""
     ensure_kcli_config()
+    
+    topology = get_cluster_topology_description(ctlplanes, workers)
 
     if dry_run:
         print("\nDry run requested; not invoking 'kcli create cluster'.")
@@ -102,18 +112,20 @@ def _deploy_local(params: Dict[str, str], dry_run: bool) -> None:
     kcli_cmd = ["kcli", "create", "cluster", "openshift"]
     kcli_cmd.extend(build_kcli_params(params))
     
-    print("\nStarting Single Node OpenShift deployment with kcli...")
+    print(f"\nStarting OpenShift deployment [{topology}] with kcli...")
     print(f"  kcli command: {' '.join(kcli_cmd)}")
     run(kcli_cmd, check=True)
-    print("\nSNO deployment command has completed.")
-    print("Check 'kcli list' and the OpenShift console once the node is fully up.")
+    print(f"\nOpenShift deployment [{topology}] command has completed.")
+    print("Check 'kcli list' and the OpenShift console once the cluster is fully up.")
 
 
 def _deploy_remote(
-    params: Dict[str, str],
+    params: Dict[str, Any],
     cluster_name: str,
     api_ip: str,
     domain: str,
+    ctlplanes: int,
+    workers: int,
     remote_host: str,
     remote_user: str,
     dry_run: bool,
@@ -122,7 +134,7 @@ def _deploy_remote(
     ssh_key: Optional[str] = None,
     pci_devices: Optional[List[str]] = None,
 ) -> None:
-    """Deploy SNO cluster on a remote libvirt host."""
+    """Deploy OpenShift cluster on a remote libvirt host."""
     from remote import (
         setup_remote_libvirt,
         configure_kcli_remote_client,
@@ -134,16 +146,19 @@ def _deploy_remote(
         attach_pci_devices,
     )
     
+    topology = get_cluster_topology_description(ctlplanes, workers)
+    
     # Configure SSH key if provided
     if ssh_key:
         set_ssh_key_path(ssh_key)
         print(f"Using SSH key: {ssh_key}")
     
     print(f"\n{'='*60}")
-    print(f"Remote SNO Deployment")
+    print(f"Remote OpenShift Deployment [{topology}]")
     print(f"{'='*60}")
     print(f"Remote Host: {remote_user}@{remote_host}")
     print(f"Cluster Name: {cluster_name}")
+    print(f"Topology: {topology}")
     print(f"API IP: {api_ip}")
     print(f"Domain: {domain}")
     print(f"Wait Timeout: {wait_timeout}s")
@@ -172,7 +187,7 @@ def _deploy_remote(
         shutil.rmtree(clusters_dir)
     
     # Deploy the cluster (run in background, we'll monitor ourselves)
-    print("\nStep 4: Deploying OpenShift SNO cluster...")
+    print(f"\nStep 4: Deploying OpenShift cluster [{topology}]...")
     print("Starting kcli deployment (monitoring will be done via remote host)...")
     
     # Build kcli command with all parameters via -P flags
@@ -189,6 +204,11 @@ def _deploy_remote(
         stderr=subprocess.STDOUT,
         text=True,
     )
+    
+    # Calculate expected VM count: ctlplanes + workers + 1 bootstrap
+    # kcli creates a bootstrap VM during installation
+    expected_vms = ctlplanes + workers + 1
+    min_vms_to_proceed = 2  # At least bootstrap + 1 node
     
     # Wait for VMs to be deployed
     print("\nStep 5: Waiting for VMs to be deployed...")
@@ -209,8 +229,8 @@ def _deploy_remote(
         result = run(["kcli", "-C", kcli_client, "list", "vm"], check=False, capture_output=True)
         vm_count = result.stdout.count(f"{cluster_name}-")
         
-        if vm_count >= 2:
-            print(f"  VMs deployed: {vm_count} VMs found")
+        if vm_count >= min_vms_to_proceed:
+            print(f"  VMs deployed: {vm_count} VMs found (expecting {expected_vms} total)")
             break
         
         elapsed = int(time.time() - vm_wait_start)
@@ -227,7 +247,7 @@ def _deploy_remote(
         
         # Print status every 30 seconds or if we find VMs
         if elapsed % 30 == 0 or vm_count > 0:
-            print(f"  Waiting for VMs... ({elapsed}s elapsed, found {vm_count} VMs)")
+            print(f"  Waiting for VMs... ({elapsed}s elapsed, found {vm_count} VMs, expecting {expected_vms})")
         time.sleep(10)
     
     # Show deployed VMs

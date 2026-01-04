@@ -1,25 +1,25 @@
 """
-Delete Single Node OpenShift (SNO) cluster using kcli.
+Delete OpenShift cluster using kcli.
 Supports both local and remote libvirt hosts.
 """
 
 import shutil
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from common import run
 from kcli_preflight import ensure_kcli_installed
 
 
-def delete_sno(
-    params: Dict[str, str],
+def delete_cluster(
+    params: Dict[str, Any],
     dry_run: bool = False,
     remote_host: Optional[str] = None,
     remote_user: str = "root",
     ssh_key: Optional[str] = None,
 ) -> None:
     """
-    Delete the Single Node OpenShift (SNO) cluster.
+    Delete the OpenShift cluster.
     
     Args:
         params: Parameters dictionary (must contain 'cluster' key)
@@ -30,7 +30,7 @@ def delete_sno(
     """
     ensure_kcli_installed()
     
-    cluster_name = params.get("cluster", "sno")
+    cluster_name = params.get("cluster", "ocp")
     
     print(f"Preparing to delete cluster: {cluster_name}")
     
@@ -41,7 +41,7 @@ def delete_sno(
 
 
 def _delete_local(cluster_name: str, dry_run: bool) -> None:
-    """Delete SNO cluster locally."""
+    """Delete OpenShift cluster locally."""
     if dry_run:
         print(f"Dry run: would execute 'kcli delete cluster {cluster_name} --yes'")
         return
@@ -65,7 +65,7 @@ def _delete_remote(
     dry_run: bool,
     ssh_key: Optional[str] = None,
 ) -> None:
-    """Delete SNO cluster on a remote libvirt host."""
+    """Delete OpenShift cluster on a remote libvirt host."""
     from remote import get_kcli_client_name, configure_kcli_remote_client, check_ssh_connectivity, set_ssh_key_path
     
     # Configure SSH key if provided
