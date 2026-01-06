@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """
-Deploy or Delete a Single Node OpenShift (SNO) cluster using kcli.
+Deploy or Delete an OpenShift cluster using kcli.
 
 Supports both local and remote libvirt hosts.
+Default topology is SNO (Single Node OpenShift): 1 control plane, 0 workers.
+Multi-node clusters can be deployed by specifying --ctlplanes and --workers.
 
 Usage:
-  # Deploy to remote host (version and pull-secret are required)
+  # Deploy SNO to remote host (version and pull-secret are required)
   python main.py --version 4.20 --pull-secret-path /path/to/secret.json --remote user@host deploy
+  
+  # Deploy multi-node cluster (3 control planes + 2 workers)
+  python main.py --version 4.20 --pull-secret-path /path/to/secret.json --ctlplanes 3 --workers 2 --remote user@host deploy
   
   # Delete cluster (local or remote)
   python main.py --remote user@host delete
@@ -19,10 +24,10 @@ import os
 import re
 import sys
 
-from config import get_kcli_params, print_config, CLUSTER_NAME
+from config import get_kcli_params, print_config, CLUSTER_NAME, CTLPLANES, WORKERS
 from params import update_version_to_latest_patch
-from deploy import deploy_sno
-from delete import delete_sno
+from deploy import deploy_cluster
+from delete import delete_cluster
 
 
 def parse_remote_arg(remote: str | None) -> tuple[str | None, str]:
@@ -43,12 +48,15 @@ def parse_remote_arg(remote: str | None) -> tuple[str | None, str]:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Manage Single Node OpenShift (SNO) cluster with kcli.",
+        description="Manage OpenShift cluster with kcli. Default topology is SNO (1 control plane, 0 workers).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Deploy to remote host
+  # Deploy SNO (Single Node OpenShift) to remote host
   %(prog)s --version 4.20 --pull-secret-path ~/keys/ps.json --remote root@myhost.example.com deploy
+  
+  # Deploy multi-node cluster (3 control planes + 2 workers)
+  %(prog)s --version 4.20 --pull-secret-path ~/keys/ps.json --ctlplanes 3 --workers 2 --remote root@myhost.example.com deploy
   
   # Delete cluster from remote host
   %(prog)s --remote root@myhost.example.com delete
@@ -58,6 +66,9 @@ Environment variables:
   PULL_SECRET_PATH    - Path to pull secret file (required for deploy)
   SSH_KEY_PATH        - Path to SSH private key for remote connections (optional)
   PCI_DEVICES         - Comma or space-separated PCI device addresses for passthrough (optional)
+  CLUSTER_NAME        - Name of the cluster (default: ocp)
+  CTLPLANES           - Number of control plane nodes (default: 1 for SNO)
+  WORKERS             - Number of worker nodes (default: 0 for SNO)
   CTLPLANE_NUMCPUS    - Number of vCPUs per control plane node (default: 6)
   WORKER_NUMCPUS      - Number of vCPUs per worker node (default: 4)
   WAIT_TIMEOUT        - Max seconds to wait for cluster ready (default: 3600)
@@ -111,6 +122,20 @@ Environment variables:
         help="PCI device address for passthrough (e.g., 0000:b3:00.0). Can be specified multiple times. (env: PCI_DEVICES)",
     )
     parser.add_argument(
+        "--ctlplanes",
+        dest="ctlplanes",
+        type=int,
+        default=None,
+        help=f"Number of control plane nodes (default: {CTLPLANES} for SNO). (env: CTLPLANES)",
+    )
+    parser.add_argument(
+        "--workers",
+        dest="workers",
+        type=int,
+        default=None,
+        help=f"Number of worker nodes (default: {WORKERS} for SNO). (env: WORKERS)",
+    )
+    parser.add_argument(
         "--ctlplane-numcpus",
         dest="ctlplane_numcpus",
         type=int,
@@ -124,14 +149,20 @@ Environment variables:
         default=None,
         help="Number of vCPUs per worker node (default: 4). (env: WORKER_NUMCPUS)",
     )
+    parser.add_argument(
+        "--cluster-name",
+        dest="cluster_name",
+        default=os.environ.get("CLUSTER_NAME"),
+        help=f"Name of the cluster (default: {CLUSTER_NAME}). (env: CLUSTER_NAME)",
+    )
 
     subparsers = parser.add_subparsers(dest="command", help="Action to perform")
     
     # Deploy command
-    subparsers.add_parser("deploy", help="Deploy the SNO cluster")
+    subparsers.add_parser("deploy", help="Deploy the OpenShift cluster")
     
     # Delete command
-    subparsers.add_parser("delete", help="Delete the SNO cluster")
+    subparsers.add_parser("delete", help="Delete the OpenShift cluster")
 
     args = parser.parse_args(argv)
     
@@ -170,6 +201,19 @@ def main(argv: list[str] | None = None) -> int:
                 # Support both comma and space delimiters
                 pci_devices = [d.strip() for d in re.split(r"[,\s]+", env_pci) if d.strip()]
         
+        # Get node counts from args or environment
+        ctlplanes = args.ctlplanes
+        if ctlplanes is None:
+            env_ctlplanes = os.environ.get("CTLPLANES", "")
+            if env_ctlplanes:
+                ctlplanes = int(env_ctlplanes)
+        
+        workers = args.workers
+        if workers is None:
+            env_workers = os.environ.get("WORKERS", "")
+            if env_workers:
+                workers = int(env_workers)
+        
         # Get CPU counts from args or environment
         ctlplane_numcpus = args.ctlplane_numcpus
         if ctlplane_numcpus is None:
@@ -187,6 +231,9 @@ def main(argv: list[str] | None = None) -> int:
         params = get_kcli_params(
             tag=ocp_version,
             pull_secret=args.pull_secret,
+            cluster_name=args.cluster_name,
+            ctlplanes=ctlplanes,
+            workers=workers,
             ctlplane_numcpus=ctlplane_numcpus,
             worker_numcpus=worker_numcpus,
         )
@@ -196,7 +243,7 @@ def main(argv: list[str] | None = None) -> int:
         if pci_devices:
             print(f"PCI Passthrough Devices: {pci_devices}")
         
-        deploy_sno(
+        deploy_cluster(
             params=params,
             dry_run=args.dry_run,
             remote_host=host,
@@ -209,9 +256,10 @@ def main(argv: list[str] | None = None) -> int:
         
     elif command == "delete":
         # For delete, we just need the cluster name from config
-        params = {"cluster": CLUSTER_NAME}
+        cluster_name = args.cluster_name if args.cluster_name else CLUSTER_NAME
+        params = {"cluster": cluster_name}
         
-        delete_sno(
+        delete_cluster(
             params=params,
             dry_run=args.dry_run,
             remote_host=host,
