@@ -2,269 +2,112 @@
 """
 Deploy or Delete an OpenShift cluster using kcli.
 
-Supports both local and remote libvirt hosts.
-Default topology is SNO (Single Node OpenShift): 1 control plane, 0 workers.
-Multi-node clusters can be deployed by specifying --ctlplanes and --workers.
-
 Usage:
-  # Deploy SNO to remote host (version and pull-secret are required)
-  python main.py --version 4.20 --pull-secret-path /path/to/secret.json --remote user@host deploy
-  
-  # Deploy multi-node cluster (3 control planes + 2 workers)
-  python main.py --version 4.20 --pull-secret-path /path/to/secret.json --ctlplanes 3 --workers 2 --remote user@host deploy
-  
-  # Delete cluster (local or remote)
-  python main.py --remote user@host delete
+  python main.py --config cluster-config.yaml deploy
+  python main.py --config cluster-config.yaml delete
+  python main.py --config cluster-config.yaml --dry-run deploy
 """
 
 from __future__ import annotations
 
 import argparse
-import os
-import re
 import sys
 
-from config import get_kcli_params, print_config, CLUSTER_NAME, CTLPLANES, WORKERS
+from config import (
+    get_kcli_params,
+    load_cluster_config,
+    print_config,
+)
 from params import update_version_to_latest_patch
 from deploy import deploy_cluster
 from delete import delete_cluster
 
 
-def parse_remote_arg(remote: str | None) -> tuple[str | None, str]:
-    """
-    Parse the --remote argument into (host, user).
-    Accepts formats: 'host', 'user@host'
-    Returns (host, user) where user defaults to 'root' if not specified.
-    """
-    if not remote:
-        return None, "root"
-    
-    if "@" in remote:
-        user, host = remote.split("@", 1)
-        return host, user
-    else:
-        return remote, "root"
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Manage OpenShift cluster with kcli. Default topology is SNO (1 control plane, 0 workers).",
+        description="Manage OpenShift cluster with kcli.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Deploy SNO (Single Node OpenShift) to remote host
-  %(prog)s --version 4.20 --pull-secret-path ~/keys/ps.json --remote root@myhost.example.com deploy
-  
-  # Deploy multi-node cluster (3 control planes + 2 workers)
-  %(prog)s --version 4.20 --pull-secret-path ~/keys/ps.json --ctlplanes 3 --workers 2 --remote root@myhost.example.com deploy
-  
-  # Delete cluster from remote host
-  %(prog)s --remote root@myhost.example.com delete
-
-Environment variables:
-  OCP_CLUSTER_VERSION - OpenShift version to install (required for deploy)
-  PULL_SECRET_PATH    - Path to pull secret file (required for deploy)
-  SSH_KEY_PATH        - Path to SSH private key for remote connections (optional)
-  PCI_DEVICES         - Comma or space-separated PCI device addresses for passthrough (optional)
-  CLUSTER_NAME        - Name of the cluster (default: ocp)
-  CTLPLANES           - Number of control plane nodes (default: 1 for SNO)
-  WORKERS             - Number of worker nodes (default: 0 for SNO)
-  CTLPLANE_NUMCPUS    - Number of vCPUs per control plane node (default: 6)
-  WORKER_NUMCPUS      - Number of vCPUs per worker node (default: 4)
-  WAIT_TIMEOUT        - Max seconds to wait for cluster ready (default: 3600)
-  NO_WAIT             - Set to 'true' to skip waiting for cluster ready
+  %(prog)s --config cluster-config.yaml deploy
+  %(prog)s --config cluster-config.yaml delete
+  %(prog)s --config cluster-config.yaml --dry-run deploy
 """,
     )
+    
     parser.add_argument(
-        "--version",
-        dest="ocp_version",
-        default=os.environ.get("OCP_CLUSTER_VERSION"),
-        help="OpenShift version to install (e.g., 4.20 or 4.20.6). Required for deploy. (env: OCP_CLUSTER_VERSION)",
+        "-c", "--config",
+        dest="config_file",
+        required=True,
+        help="Path to YAML configuration file.",
     )
-    parser.add_argument(
-        "--pull-secret-path",
-        dest="pull_secret",
-        default=os.environ.get("PULL_SECRET_PATH"),
-        help="Path to pull secret file. Required for deploy. (env: PULL_SECRET_PATH)",
-    )
-    parser.add_argument(
-        "--remote",
-        metavar="[USER@]HOST",
-        help="Remote libvirt host. Format: 'hostname' or 'user@hostname' (default user: root)",
-    )
-    parser.add_argument(
-        "--ssh-key",
-        dest="ssh_key",
-        default=os.environ.get("SSH_KEY_PATH"),
-        help="Path to SSH private key file for remote connections. (env: SSH_KEY_PATH)",
-    )
+    
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Show configuration but do not run kcli commands.",
     )
-    parser.add_argument(
-        "--no-wait",
-        action="store_true",
-        help="Don't wait for cluster to be ready (remote deployments only).",
-    )
-    parser.add_argument(
-        "--wait-timeout",
-        type=int,
-        default=int(os.environ.get("WAIT_TIMEOUT", "3600")),
-        help="Timeout in seconds waiting for cluster ready (default: 3600, env: WAIT_TIMEOUT)",
-    )
-    parser.add_argument(
-        "--pci-device",
-        dest="pci_devices",
-        action="append",
-        default=None,
-        help="PCI device address for passthrough (e.g., 0000:b3:00.0). Can be specified multiple times. (env: PCI_DEVICES)",
-    )
-    parser.add_argument(
-        "--ctlplanes",
-        dest="ctlplanes",
-        type=int,
-        default=None,
-        help=f"Number of control plane nodes (default: {CTLPLANES} for SNO). (env: CTLPLANES)",
-    )
-    parser.add_argument(
-        "--workers",
-        dest="workers",
-        type=int,
-        default=None,
-        help=f"Number of worker nodes (default: {WORKERS} for SNO). (env: WORKERS)",
-    )
-    parser.add_argument(
-        "--ctlplane-numcpus",
-        dest="ctlplane_numcpus",
-        type=int,
-        default=None,
-        help="Number of vCPUs per control plane node (default: 6). (env: CTLPLANE_NUMCPUS)",
-    )
-    parser.add_argument(
-        "--worker-numcpus",
-        dest="worker_numcpus",
-        type=int,
-        default=None,
-        help="Number of vCPUs per worker node (default: 4). (env: WORKER_NUMCPUS)",
-    )
-    parser.add_argument(
-        "--cluster-name",
-        dest="cluster_name",
-        default=os.environ.get("CLUSTER_NAME"),
-        help=f"Name of the cluster (default: {CLUSTER_NAME}). (env: CLUSTER_NAME)",
-    )
 
     subparsers = parser.add_subparsers(dest="command", help="Action to perform")
-    
-    # Deploy command
     subparsers.add_parser("deploy", help="Deploy the OpenShift cluster")
-    
-    # Delete command
     subparsers.add_parser("delete", help="Delete the OpenShift cluster")
 
-    args = parser.parse_args(argv)
-    
-    # Validation
-    if args.command == "deploy":
-        if not args.ocp_version:
-            parser.error("deploy command requires --version or OCP_CLUSTER_VERSION env var")
-        if not args.pull_secret:
-            parser.error("deploy command requires --pull-secret-path or PULL_SECRET_PATH env var")
-    
-    return args
+    return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    
-    # Default to deploy if no command is specified
     command = args.command or "deploy"
     
-    # Parse remote argument
-    host, user = parse_remote_arg(args.remote)
+    # Load configuration from file
+    try:
+        config = load_cluster_config(args.config_file)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
     
-    # Check for NO_WAIT environment variable
-    no_wait = args.no_wait or os.environ.get("NO_WAIT", "").lower() == "true"
+    # Validation for deploy command
+    if command == "deploy":
+        if not config.ocp_version:
+            print("Error: ocp_version is required in config file", file=sys.stderr)
+            return 1
+        if not config.pull_secret_path:
+            print("Error: pull_secret_path is required in config file", file=sys.stderr)
+            return 1
 
     if command == "deploy":
         # Get the OCP version (auto-update to latest patch if X.Y format)
-        ocp_version = args.ocp_version
-        ocp_version = update_version_to_latest_patch(ocp_version)
+        ocp_version = update_version_to_latest_patch(config.ocp_version, config.version_channel)
         
-        # Get PCI devices from args or environment
-        pci_devices = args.pci_devices
-        if not pci_devices:
-            env_pci = os.environ.get("PCI_DEVICES", "")
-            if env_pci:
-                # Support both comma and space delimiters
-                pci_devices = [d.strip() for d in re.split(r"[,\s]+", env_pci) if d.strip()]
-        
-        # Get node counts from args or environment
-        ctlplanes = args.ctlplanes
-        if ctlplanes is None:
-            env_ctlplanes = os.environ.get("CTLPLANES", "")
-            if env_ctlplanes:
-                ctlplanes = int(env_ctlplanes)
-        
-        workers = args.workers
-        if workers is None:
-            env_workers = os.environ.get("WORKERS", "")
-            if env_workers:
-                workers = int(env_workers)
-        
-        # Get CPU counts from args or environment
-        ctlplane_numcpus = args.ctlplane_numcpus
-        if ctlplane_numcpus is None:
-            env_ctlplane_numcpus = os.environ.get("CTLPLANE_NUMCPUS", "")
-            if env_ctlplane_numcpus:
-                ctlplane_numcpus = int(env_ctlplane_numcpus)
-        
-        worker_numcpus = args.worker_numcpus
-        if worker_numcpus is None:
-            env_worker_numcpus = os.environ.get("WORKER_NUMCPUS", "")
-            if env_worker_numcpus:
-                worker_numcpus = int(env_worker_numcpus)
-        
-        # Build parameters from config + CLI args
-        params = get_kcli_params(
-            tag=ocp_version,
-            pull_secret=args.pull_secret,
-            cluster_name=args.cluster_name,
-            ctlplanes=ctlplanes,
-            workers=workers,
-            ctlplane_numcpus=ctlplane_numcpus,
-            worker_numcpus=worker_numcpus,
-        )
+        # Build parameters from config
+        params = get_kcli_params(config, ocp_version)
         
         # Print configuration
         print_config(params)
-        if pci_devices:
-            print(f"PCI Passthrough Devices: {pci_devices}")
+        if config.pci_devices:
+            print(f"PCI Passthrough Devices: {config.pci_devices}")
+        print(f"Config file: {args.config_file}")
         
         deploy_cluster(
             params=params,
             dry_run=args.dry_run,
-            remote_host=host,
-            pci_devices=pci_devices,
-            remote_user=user,
-            wait_timeout=args.wait_timeout,
-            no_wait=no_wait,
-            ssh_key=args.ssh_key,
+            remote_host=config.remote.host,
+            pci_devices=config.pci_devices,
+            remote_user=config.remote.user,
+            wait_timeout=config.wait_timeout,
+            no_wait=config.no_wait,
+            ssh_key=config.remote.ssh_key_path,
         )
         
     elif command == "delete":
-        # For delete, we just need the cluster name from config
-        cluster_name = args.cluster_name if args.cluster_name else CLUSTER_NAME
-        params = {"cluster": cluster_name}
+        params = {"cluster": config.cluster_name}
         
         delete_cluster(
             params=params,
             dry_run=args.dry_run,
-            remote_host=host,
-            remote_user=user,
-            ssh_key=args.ssh_key,
+            remote_host=config.remote.host,
+            remote_user=config.remote.user,
+            ssh_key=config.remote.ssh_key_path,
         )
         
     else:

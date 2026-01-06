@@ -1,0 +1,33 @@
+# OpenShift Cluster Configuration
+
+# Required
+ocp_version: "4.20"
+pull_secret_path: ~/keys/pull-secret.json
+
+# Optional
+cluster_name: ocp
+domain: example.com
+ctlplanes: 1
+workers: 0
+
+ctlplane:
+  numcpus: 6
+  memory: 18432
+
+worker:
+  numcpus: 4
+  memory: 16384
+
+disk_size: 120
+network: default
+api_ip: "192.168.122.253"
+
+remote:
+  host: null
+  user: root
+  ssh_key_path: null
+
+pci_devices: []
+wait_timeout: 3600
+no_wait: false
+version_channel: stable
