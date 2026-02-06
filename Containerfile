@@ -27,10 +27,11 @@ RUN echo -e '[centos-stream-crb]\nname=CentOS Stream 9 - CRB\nbaseurl=https://mi
     ln -sf /usr/bin/python3.12 /usr/local/bin/python && \
     dnf clean all
 
-# Install kcli from GitHub main (to get latest fixes) and libvirt-python
-# Using GitHub instead of PyPI to avoid issues with stale PyPI releases
-RUN python3.12 -m pip install git+https://github.com/karmab/kcli.git@main libvirt-python && \
-    python3 -m pip install git+https://github.com/karmab/kcli.git@main libvirt-python || true
+# Install kcli from GitHub at a pinned commit and libvirt-python
+# Pinned to commit ea18b6f (Jan 23, 2026) to avoid batch/{{ version }} bug
+ARG KCLI_COMMIT=ea18b6f853905832f02abc765014bbdbc48d29bd
+RUN python3.12 -m pip install git+https://github.com/karmab/kcli.git@${KCLI_COMMIT} libvirt-python && \
+    python3 -m pip install git+https://github.com/karmab/kcli.git@${KCLI_COMMIT} libvirt-python || true
 
 # Get the source code in there
 WORKDIR /root/amd-ci
