@@ -1,5 +1,4 @@
 FROM quay.io/openshift/origin-cli:4.20 as oc-cli
-FROM quay.io/karmab/kcli:latest as kcli-cli
 FROM registry.access.redhat.com/ubi9/go-toolset:1.24.4
 
 LABEL org.opencontainers.image.authors="Red Hat Ecosystem Engineering"
@@ -28,9 +27,10 @@ RUN echo -e '[centos-stream-crb]\nname=CentOS Stream 9 - CRB\nbaseurl=https://mi
     ln -sf /usr/bin/python3.12 /usr/local/bin/python && \
     dnf clean all
 
-# Install kcli and libvirt-python for both python3.12 and system python3
-RUN python3.12 -m pip install kcli libvirt-python && \
-    python3 -m pip install kcli libvirt-python || true
+# Install kcli from GitHub main (to get latest fixes) and libvirt-python
+# Using GitHub instead of PyPI to avoid issues with stale PyPI releases
+RUN python3.12 -m pip install git+https://github.com/karmab/kcli.git@main libvirt-python && \
+    python3 -m pip install git+https://github.com/karmab/kcli.git@main libvirt-python || true
 
 # Get the source code in there
 WORKDIR /root/amd-ci
