@@ -31,14 +31,6 @@ ifndef CONFIG_FILE_PATH
 endif
 	python3 cluster-provision/main.py --config $(CONFIG_FILE_PATH) delete
 
-# Dry run deployment (shows config without deploying)
-# Usage: make cluster-dry-run CONFIG_FILE_PATH=cluster-config.yaml
-cluster-dry-run:
-ifndef CONFIG_FILE_PATH
-	$(error CONFIG_FILE_PATH is required. Usage: make cluster-dry-run CONFIG_FILE_PATH=cluster-config.yaml)
-endif
-	python3 cluster-provision/main.py --config $(CONFIG_FILE_PATH) --dry-run deploy
-
 # Help target
 help:
 	@echo "OpenShift Cluster Provisioner"
@@ -51,7 +43,6 @@ help:
 	@echo "Targets:"
 	@echo "  make cluster-deploy CONFIG_FILE_PATH=<path>  - Deploy cluster"
 	@echo "  make cluster-delete CONFIG_FILE_PATH=<path>  - Delete cluster"
-	@echo "  make cluster-dry-run CONFIG_FILE_PATH=<path> - Dry run (show config)"
 	@echo "  make help                               - Show this help"
 	@echo ""
 	@echo "Config file options (see cluster-config.yaml.example):"
@@ -59,4 +50,4 @@ help:
 	@echo "  ctlplane.numcpus, worker.numcpus, remote.host, remote.user,"
 	@echo "  remote.ssh_key_path, pci_devices, wait_timeout, no_wait"
 
-.PHONY: test cluster-deploy cluster-delete cluster-dry-run help
+.PHONY: test cluster-deploy cluster-delete help

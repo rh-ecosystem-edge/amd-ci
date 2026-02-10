@@ -13,17 +13,15 @@ from kcli_preflight import ensure_kcli_installed
 
 def delete_cluster(
     params: Dict[str, Any],
-    dry_run: bool = False,
     remote_host: Optional[str] = None,
     remote_user: str = "root",
     ssh_key: Optional[str] = None,
 ) -> None:
     """
     Delete the OpenShift cluster.
-    
+
     Args:
         params: Parameters dictionary (must contain 'cluster' key)
-        dry_run: If True, don't actually run kcli commands
         remote_host: Remote libvirt host (None for local deletion)
         remote_user: SSH user for remote host
         ssh_key: Path to SSH private key file (optional)
@@ -35,17 +33,13 @@ def delete_cluster(
     print(f"Preparing to delete cluster: {cluster_name}")
     
     if remote_host:
-        _delete_remote(cluster_name, remote_host, remote_user, dry_run, ssh_key)
+        _delete_remote(cluster_name, remote_host, remote_user, ssh_key)
     else:
-        _delete_local(cluster_name, dry_run)
+        _delete_local(cluster_name)
 
 
-def _delete_local(cluster_name: str, dry_run: bool) -> None:
+def _delete_local(cluster_name: str) -> None:
     """Delete OpenShift cluster locally."""
-    if dry_run:
-        print(f"Dry run: would execute 'kcli delete cluster {cluster_name} --yes'")
-        return
-        
     print(f"Deleting cluster {cluster_name}...")
     run(["kcli", "delete", "cluster", cluster_name, "--yes"], check=True)
     
@@ -62,7 +56,6 @@ def _delete_remote(
     cluster_name: str,
     remote_host: str,
     remote_user: str,
-    dry_run: bool,
     ssh_key: Optional[str] = None,
 ) -> None:
     """Delete OpenShift cluster on a remote libvirt host."""
@@ -89,11 +82,7 @@ def _delete_remote(
     if result.returncode != 0:
         print(f"Configuring kcli client '{kcli_client}'...")
         kcli_client = configure_kcli_remote_client(remote_host, remote_user)
-    
-    if dry_run:
-        print(f"Dry run: would execute 'kcli -C {kcli_client} delete cluster {cluster_name} --yes'")
-        return
-    
+
     print(f"Deleting cluster {cluster_name} from remote host...")
     run(
         ["kcli", "-C", kcli_client, "delete", "cluster", cluster_name, "--yes"],

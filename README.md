@@ -138,9 +138,6 @@ make cluster-deploy CONFIG_FILE_PATH=cluster-config.yaml
 # Delete cluster
 make cluster-delete CONFIG_FILE_PATH=cluster-config.yaml
 
-# Dry run (show config without deploying)
-make cluster-dry-run CONFIG_FILE_PATH=cluster-config.yaml
-
 # Show help
 make help
 ```

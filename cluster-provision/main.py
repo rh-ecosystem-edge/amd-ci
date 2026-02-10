@@ -5,7 +5,6 @@ Deploy or Delete an OpenShift cluster using kcli.
 Usage:
   python main.py --config cluster-config.yaml deploy
   python main.py --config cluster-config.yaml delete
-  python main.py --config cluster-config.yaml --dry-run deploy
 """
 
 from __future__ import annotations
@@ -31,7 +30,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 Examples:
   %(prog)s --config cluster-config.yaml deploy
   %(prog)s --config cluster-config.yaml delete
-  %(prog)s --config cluster-config.yaml --dry-run deploy
 """,
     )
     
@@ -40,12 +38,6 @@ Examples:
         dest="config_file",
         required=True,
         help="Path to YAML configuration file.",
-    )
-    
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Show configuration but do not run kcli commands.",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Action to perform")
@@ -90,7 +82,6 @@ def main(argv: list[str] | None = None) -> int:
         
         deploy_cluster(
             params=params,
-            dry_run=args.dry_run,
             remote_host=config.remote.host,
             pci_devices=config.pci_devices,
             remote_user=config.remote.user,
@@ -104,7 +95,6 @@ def main(argv: list[str] | None = None) -> int:
         
         delete_cluster(
             params=params,
-            dry_run=args.dry_run,
             remote_host=config.remote.host,
             remote_user=config.remote.user,
             ssh_key=config.remote.ssh_key_path,
