@@ -30,7 +30,6 @@ def build_kcli_params(params: Dict[str, str]) -> List[str]:
 
 def deploy_cluster(
     params: Dict[str, Any],
-    dry_run: bool = False,
     remote_host: Optional[str] = None,
     remote_user: str = "root",
     wait_timeout: int = 3600,
@@ -40,10 +39,9 @@ def deploy_cluster(
 ) -> None:
     """
     Main deployment flow, driven by the kcli parameters.
-    
+
     Args:
         params: Parameters dictionary (from config.get_kcli_params)
-        dry_run: If True, don't actually run kcli commands
         remote_host: Remote libvirt host (None for local deployment)
         remote_user: SSH user for remote host
         wait_timeout: Timeout in seconds for cluster ready (remote only)
@@ -83,7 +81,6 @@ def deploy_cluster(
             workers=workers,
             remote_host=remote_host,
             remote_user=remote_user,
-            dry_run=dry_run,
             wait_timeout=wait_timeout,
             no_wait=no_wait,
             ssh_key=ssh_key,
@@ -94,19 +91,14 @@ def deploy_cluster(
             params=params,
             ctlplanes=ctlplanes,
             workers=workers,
-            dry_run=dry_run,
         )
 
 
-def _deploy_local(params: Dict[str, Any], ctlplanes: int, workers: int, dry_run: bool) -> None:
+def _deploy_local(params: Dict[str, Any], ctlplanes: int, workers: int) -> None:
     """Deploy OpenShift cluster locally."""
     ensure_kcli_config()
-    
-    topology = get_cluster_topology_description(ctlplanes, workers)
 
-    if dry_run:
-        print("\nDry run requested; not invoking 'kcli create cluster'.")
-        return
+    topology = get_cluster_topology_description(ctlplanes, workers)
 
     # Build kcli command with all parameters via -P flags
     kcli_cmd = ["kcli", "create", "cluster", "openshift"]
@@ -128,7 +120,6 @@ def _deploy_remote(
     workers: int,
     remote_host: str,
     remote_user: str,
-    dry_run: bool,
     wait_timeout: int,
     no_wait: bool,
     ssh_key: Optional[str] = None,
@@ -166,18 +157,14 @@ def _deploy_remote(
     if ssh_key:
         print(f"SSH Key: {ssh_key}")
     print(f"{'='*60}\n")
-    
+
     # Setup remote host (idempotent)
     print("Step 1: Setting up remote host...")
     setup_remote_libvirt(remote_host, remote_user)
-    
+
     # Configure kcli client
     print("\nStep 2: Configuring kcli client...")
     kcli_client = configure_kcli_remote_client(remote_host, remote_user)
-
-    if dry_run:
-        print("\nDry run requested; not invoking 'kcli create cluster'.")
-        return
 
     # Clean up any existing cluster
     print(f"\nStep 3: Cleaning up any existing cluster '{cluster_name}'...")
