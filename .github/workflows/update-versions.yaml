@@ -19,8 +19,7 @@ on:
         default: '2'
 jobs:
   ocp-version:
-    # Temporarily disabled automatic runs - original condition: github.event_name != 'schedule' || github.repository == 'rh-ecosystem-edge/amd-ci' || vars.VERSION_UPDATE_FLOW_ENABLE_SCHEDULED == 'true'
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name != 'schedule' || github.repository == 'rh-ecosystem-edge/amd-ci' || vars.VERSION_UPDATE_FLOW_ENABLE_SCHEDULED == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out the Repo
