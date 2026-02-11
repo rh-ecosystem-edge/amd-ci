@@ -48,6 +48,6 @@ help:
 	@echo "Config file options (see cluster-config.yaml.example):"
 	@echo "  ocp_version, pull_secret_path, cluster_name, ctlplanes, workers,"
 	@echo "  ctlplane.numcpus, worker.numcpus, remote.host, remote.user,"
-	@echo "  remote.ssh_key_path, pci_devices, wait_timeout, no_wait"
+	@echo "  remote.ssh_key_path, pci_devices, wait_timeout"
 
 .PHONY: test cluster-deploy cluster-delete help

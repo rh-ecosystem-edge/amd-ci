@@ -33,7 +33,6 @@ def deploy_cluster(
     remote_host: Optional[str] = None,
     remote_user: str = "root",
     wait_timeout: int = 3600,
-    no_wait: bool = False,
     ssh_key: Optional[str] = None,
     pci_devices: Optional[List[str]] = None,
 ) -> None:
@@ -45,7 +44,6 @@ def deploy_cluster(
         remote_host: Remote libvirt host (None for local deployment)
         remote_user: SSH user for remote host
         wait_timeout: Timeout in seconds for cluster ready (remote only)
-        no_wait: Skip waiting for cluster ready (remote only)
         ssh_key: Path to SSH private key file (optional)
         pci_devices: List of PCI device addresses for passthrough (e.g., ["0000:b3:00.0"])
     """
@@ -82,7 +80,6 @@ def deploy_cluster(
             remote_host=remote_host,
             remote_user=remote_user,
             wait_timeout=wait_timeout,
-            no_wait=no_wait,
             ssh_key=ssh_key,
             pci_devices=pci_devices,
         )
@@ -121,7 +118,6 @@ def _deploy_remote(
     remote_host: str,
     remote_user: str,
     wait_timeout: int,
-    no_wait: bool,
     ssh_key: Optional[str] = None,
     pci_devices: Optional[List[str]] = None,
 ) -> None:
@@ -153,7 +149,6 @@ def _deploy_remote(
     print(f"API IP: {api_ip}")
     print(f"Domain: {domain}")
     print(f"Wait Timeout: {wait_timeout}s")
-    print(f"No Wait: {no_wait}")
     if ssh_key:
         print(f"SSH Key: {ssh_key}")
     print(f"{'='*60}\n")
@@ -260,11 +255,8 @@ def _deploy_remote(
         kcli_process.kill()
     
     # Wait for cluster to be ready
-    if no_wait:
-        print("\nNO_WAIT=true, skipping cluster readiness check")
-    else:
-        print(f"\nStep 7: Waiting for cluster to be ready...")
-        wait_for_cluster_ready(remote_host, remote_user, api_ip, wait_timeout)
+    print(f"\nStep 7: Waiting for cluster to be ready...")
+    wait_for_cluster_ready(remote_host, remote_user, api_ip, wait_timeout)
     
     # Final status
     print("\n" + "=" * 60)

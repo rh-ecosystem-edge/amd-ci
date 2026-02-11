@@ -29,5 +29,4 @@ remote:
 
 pci_devices: []
 wait_timeout: 3600
-no_wait: false
 version_channel: stable

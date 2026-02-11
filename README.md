@@ -58,7 +58,6 @@ workers: 0
 | `api_ip` | `192.168.122.253` | API VIP address |
 | `pci_devices` | `[]` | PCI devices for GPU passthrough |
 | `wait_timeout` | `3600` | Timeout (seconds) waiting for cluster ready |
-| `no_wait` | `false` | Skip waiting for cluster ready |
 | `version_channel` | `stable` | OCP release channel (stable, fast, candidate) |
 
 ### Local Deployment
