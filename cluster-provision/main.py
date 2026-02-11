@@ -86,7 +86,6 @@ def main(argv: list[str] | None = None) -> int:
             pci_devices=config.pci_devices,
             remote_user=config.remote.user,
             wait_timeout=config.wait_timeout,
-            no_wait=config.no_wait,
             ssh_key=config.remote.ssh_key_path,
         )
         

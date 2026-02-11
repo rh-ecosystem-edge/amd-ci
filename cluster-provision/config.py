@@ -34,7 +34,6 @@ REMOTE_USER = "root"
 
 # Deployment options
 WAIT_TIMEOUT = 3600  # seconds
-NO_WAIT = False
 
 @dataclass
 class RemoteConfig:
@@ -90,7 +89,6 @@ class ClusterConfig:
 
     # Deployment options
     wait_timeout: int = WAIT_TIMEOUT
-    no_wait: bool = NO_WAIT
     version_channel: str = VERSION_CHANNEL
 
 def _expand_path(path: str | None) -> str | None:
@@ -237,7 +235,6 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
         remote=remote,
         pci_devices=pci_devices,
         wait_timeout=raw_config.get("wait_timeout", WAIT_TIMEOUT),
-        no_wait=raw_config.get("no_wait", NO_WAIT),
         version_channel=raw_config.get("version_channel", VERSION_CHANNEL),
     )
 
