@@ -49,23 +49,14 @@ Examples:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    command = args.command or "deploy"
+    command = args.command
     
     # Load configuration from file
     try:
         config = load_cluster_config(args.config_file)
-    except FileNotFoundError as e:
+    except (FileNotFoundError, KeyError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
-    
-    # Validation for deploy command
-    if command == "deploy":
-        if not config.ocp_version:
-            print("Error: ocp_version is required in config file", file=sys.stderr)
-            return 1
-        if not config.pull_secret_path:
-            print("Error: pull_secret_path is required in config file", file=sys.stderr)
-            return 1
 
     if command == "deploy":
         # Get the OCP version (auto-update to latest patch if X.Y format)

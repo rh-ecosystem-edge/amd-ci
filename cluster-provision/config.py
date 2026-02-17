@@ -1,8 +1,8 @@
 """
 OpenShift Cluster Configuration.
 
-Contains default constants, configuration dataclasses, and YAML config file loading.
-Default configuration is Single Node OpenShift (SNO): 1 control plane, 0 workers.
+Configuration dataclasses and YAML config file loading.
+All values must be provided in the YAML config file — no implicit defaults.
 """
 
 from __future__ import annotations
@@ -14,34 +14,16 @@ from typing import Any
 
 import yaml
 
-CLUSTER_NAME = "ocp"
-DOMAIN = "example.com"
-NETWORK = "default"
-
-CTLPLANES = 1
-WORKERS = 0
-CTLPLANE_MEMORY = 18432  # MB
-CTLPLANE_NUMCPUS = 6  # Minimum 6 vCPUs for KMM, AMD GPU Operator, and NFD Operator
-WORKER_MEMORY = 16384  # MB
-WORKER_NUMCPUS = 4
-DISK_SIZE = 120  # GB
-
-API_IP = "192.168.122.253"
-
 VERSION_CHANNEL = "stable"
 
-REMOTE_USER = "root"
-
-# Deployment options
-WAIT_TIMEOUT = 3600  # seconds
 
 @dataclass
 class RemoteConfig:
     """Remote deployment configuration."""
 
-    host: str | None = None
-    user: str = REMOTE_USER
-    ssh_key_path: str | None = None
+    host: str | None
+    user: str
+    ssh_key_path: str | None
 
 
 @dataclass
@@ -54,42 +36,27 @@ class NodeConfig:
 
 @dataclass
 class ClusterConfig:
-    """Complete cluster configuration."""
+    """Complete cluster configuration.
 
-    # Cluster identification
-    ocp_version: str | None = None
-    cluster_name: str = CLUSTER_NAME
-    domain: str = DOMAIN
+    All fields are required and must be set explicitly in the YAML config file.
+    """
 
-    # Node topology
-    ctlplanes: int = CTLPLANES
-    workers: int = WORKERS
+    ocp_version: str
+    pull_secret_path: str
+    cluster_name: str
+    domain: str
+    ctlplanes: int
+    workers: int
+    ctlplane: NodeConfig
+    worker: NodeConfig
+    disk_size: int
+    network: str
+    api_ip: str
+    remote: RemoteConfig
+    pci_devices: list[str]
+    wait_timeout: int
+    version_channel: str
 
-    # Node resources
-    ctlplane: NodeConfig = field(
-        default_factory=lambda: NodeConfig(numcpus=CTLPLANE_NUMCPUS, memory=CTLPLANE_MEMORY)
-    )
-    worker: NodeConfig = field(
-        default_factory=lambda: NodeConfig(numcpus=WORKER_NUMCPUS, memory=WORKER_MEMORY)
-    )
-    disk_size: int = DISK_SIZE
-
-    # Network
-    network: str = NETWORK
-    api_ip: str = API_IP
-
-    # Secrets
-    pull_secret_path: str | None = None
-
-    # Remote deployment
-    remote: RemoteConfig = field(default_factory=RemoteConfig)
-
-    # PCI passthrough
-    pci_devices: list[str] = field(default_factory=list)
-
-    # Deployment options
-    wait_timeout: int = WAIT_TIMEOUT
-    version_channel: str = VERSION_CHANNEL
 
 def _expand_path(path: str | None) -> str | None:
     """Expand ~ and environment variables in a path."""
@@ -147,8 +114,8 @@ def get_cluster_topology_description(ctlplanes: int, workers: int) -> str:
 
 def print_config(params: dict) -> None:
     """Print the configuration in a readable format."""
-    ctlplanes = params.get("ctlplanes", CTLPLANES)
-    workers = params.get("workers", WORKERS)
+    ctlplanes = params["ctlplanes"]
+    workers = params["workers"]
     topology = get_cluster_topology_description(ctlplanes, workers)
     
     print("=" * 60)
@@ -188,55 +155,63 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
     """
     Parse raw configuration dictionary into ClusterConfig.
 
+    Every required key must be present in the YAML; missing keys raise an error.
+
     Args:
         raw_config: Dictionary from YAML file
 
     Returns:
         ClusterConfig object with parsed values
+
+    Raises:
+        KeyError: If any required configuration key is missing
     """
-    # Parse remote configuration
-    remote_data = raw_config.get("remote", {}) or {}
-    remote = RemoteConfig(
-        host=remote_data.get("host"),
-        user=remote_data.get("user", REMOTE_USER),
-        ssh_key_path=_expand_path(remote_data.get("ssh_key_path")),
-    )
+    try:
+        remote_data = raw_config["remote"]
+        remote = RemoteConfig(
+            host=remote_data.get("host"),
+            user=remote_data["user"],
+            ssh_key_path=_expand_path(remote_data.get("ssh_key_path")),
+        )
 
-    # Parse node configurations
-    ctlplane_data = raw_config.get("ctlplane", {}) or {}
-    ctlplane = NodeConfig(
-        numcpus=ctlplane_data.get("numcpus", CTLPLANE_NUMCPUS),
-        memory=ctlplane_data.get("memory", CTLPLANE_MEMORY),
-    )
+        ctlplane_data = raw_config["ctlplane"]
+        ctlplane = NodeConfig(
+            numcpus=ctlplane_data["numcpus"],
+            memory=ctlplane_data["memory"],
+        )
 
-    worker_data = raw_config.get("worker", {}) or {}
-    worker = NodeConfig(
-        numcpus=worker_data.get("numcpus", WORKER_NUMCPUS),
-        memory=worker_data.get("memory", WORKER_MEMORY),
-    )
+        worker_data = raw_config["worker"]
+        worker = NodeConfig(
+            numcpus=worker_data["numcpus"],
+            memory=worker_data["memory"],
+        )
 
-    # Parse PCI devices (ensure it's a list)
-    pci_devices = raw_config.get("pci_devices", []) or []
-    if isinstance(pci_devices, str):
-        pci_devices = [d.strip() for d in pci_devices.replace(",", " ").split() if d.strip()]
+        pci_devices = raw_config["pci_devices"] or []
+        if isinstance(pci_devices, str):
+            pci_devices = [d.strip() for d in pci_devices.replace(",", " ").split() if d.strip()]
 
-    return ClusterConfig(
-        ocp_version=raw_config.get("ocp_version"),
-        cluster_name=raw_config.get("cluster_name", CLUSTER_NAME),
-        domain=raw_config.get("domain", DOMAIN),
-        ctlplanes=raw_config.get("ctlplanes", CTLPLANES),
-        workers=raw_config.get("workers", WORKERS),
-        ctlplane=ctlplane,
-        worker=worker,
-        disk_size=raw_config.get("disk_size", DISK_SIZE),
-        network=raw_config.get("network", NETWORK),
-        api_ip=raw_config.get("api_ip", API_IP),
-        pull_secret_path=_expand_path(raw_config.get("pull_secret_path")),
-        remote=remote,
-        pci_devices=pci_devices,
-        wait_timeout=raw_config.get("wait_timeout", WAIT_TIMEOUT),
-        version_channel=raw_config.get("version_channel", VERSION_CHANNEL),
-    )
+        return ClusterConfig(
+            ocp_version=raw_config["ocp_version"],
+            pull_secret_path=_expand_path(raw_config["pull_secret_path"]),
+            cluster_name=raw_config["cluster_name"],
+            domain=raw_config["domain"],
+            ctlplanes=raw_config["ctlplanes"],
+            workers=raw_config["workers"],
+            ctlplane=ctlplane,
+            worker=worker,
+            disk_size=raw_config["disk_size"],
+            network=raw_config["network"],
+            api_ip=raw_config["api_ip"],
+            remote=remote,
+            pci_devices=pci_devices,
+            wait_timeout=raw_config["wait_timeout"],
+            version_channel=raw_config["version_channel"],
+        )
+    except KeyError as exc:
+        raise KeyError(
+            f"Missing required config key: {exc}. "
+            f"See cluster-config.yaml.example for all required fields."
+        ) from exc
 
 
 def load_cluster_config(config_path: str | Path) -> ClusterConfig:

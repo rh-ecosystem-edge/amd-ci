@@ -30,11 +30,11 @@ def build_kcli_params(params: Dict[str, str]) -> List[str]:
 
 def deploy_cluster(
     params: Dict[str, Any],
-    remote_host: Optional[str] = None,
-    remote_user: str = "root",
-    wait_timeout: int = 3600,
-    ssh_key: Optional[str] = None,
-    pci_devices: Optional[List[str]] = None,
+    remote_host: Optional[str],
+    remote_user: str,
+    wait_timeout: int,
+    ssh_key: Optional[str],
+    pci_devices: Optional[List[str]],
 ) -> None:
     """
     Main deployment flow, driven by the kcli parameters.
@@ -49,11 +49,11 @@ def deploy_cluster(
     """
     ensure_kcli_installed()
     
-    cluster_name = params.get("cluster", "ocp")
-    api_ip = params.get("api_ip", "192.168.122.253")
-    domain = params.get("domain", "example.com")
-    ctlplanes = int(params.get("ctlplanes", 1))
-    workers = int(params.get("workers", 0))
+    cluster_name = params["cluster"]
+    api_ip = params["api_ip"]
+    domain = params["domain"]
+    ctlplanes = int(params["ctlplanes"])
+    workers = int(params["workers"])
 
     # Remove existing kcli cluster artifacts directory, if present
     clusters_dir = Path.home() / ".kcli" / "clusters" / cluster_name

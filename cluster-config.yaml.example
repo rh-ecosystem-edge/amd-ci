@@ -1,10 +1,9 @@
 # OpenShift Cluster Configuration
+# All fields are required — missing keys will cause an error.
 
-# Required
 ocp_version: "4.20"
 pull_secret_path: ~/keys/pull-secret.json
 
-# Optional
 cluster_name: ocp
 domain: example.com
 ctlplanes: 1
