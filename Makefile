@@ -1,6 +1,17 @@
 test:
 	PYTHONPATH=. python3 -m unittest discover -s workflows/gpu_operator_versions/tests -v
 
+# Run AMD GPU operator verification tests (cluster must be ready with operators installed)
+# For local clusters:  make test-gpu KUBECONFIG=~/.kcli/clusters/<name>/auth/kubeconfig
+# For remote clusters: make test-gpu CONFIG_FILE_PATH=cluster-config.yaml  (sets up SSH tunnel automatically)
+# Optional env vars: AMD_DEVICECONFIG_NAME, AMD_GPU_NAMESPACE
+test-gpu:
+ifdef CONFIG_FILE_PATH
+	python3 cluster-provision/main.py --config $(CONFIG_FILE_PATH) test-gpu
+else
+	PYTHONPATH=. python3 -m pytest tests/amd_gpu/ -v
+endif
+
 # ============================================
 # OpenShift Cluster Provisioner
 # ============================================
@@ -58,11 +69,13 @@ help:
 	@echo ""
 	@echo "Each target is responsible for a single task and does NOT trigger the next one."
 	@echo "Typical workflow:"
-	@echo "  make cluster-deploy -> make cluster-operators"
+	@echo "  make cluster-deploy   -> make cluster-operators -> make test-gpu"
 	@echo ""
 	@echo "Targets:"
 	@echo "  make cluster-deploy CONFIG_FILE_PATH=<path>    - Deploy cluster (no operators, no tests)"
 	@echo "  make cluster-operators CONFIG_FILE_PATH=<path> - Install AMD GPU operators (no tests)"
+	@echo "  make test-gpu CONFIG_FILE_PATH=<path>          - Run AMD GPU verification tests only"
+	@echo "  make test-gpu                                  - Run AMD GPU tests (local kubeconfig)"
 	@echo "  make cluster-cleanup CONFIG_FILE_PATH=<path>   - Clean up AMD GPU operator stack"
 	@echo "  make cluster-delete CONFIG_FILE_PATH=<path>    - Delete cluster"
 	@echo "  make help                                      - Show this help"
@@ -73,4 +86,4 @@ help:
 	@echo "  remote.ssh_key_path, pci_devices, wait_timeout,"
 	@echo "  operators.install, operators.machine_config_role, operators.driver_version"
 
-.PHONY: test cluster-deploy cluster-delete cluster-operators cluster-cleanup help
+.PHONY: test test-gpu cluster-deploy cluster-delete cluster-operators cluster-cleanup help

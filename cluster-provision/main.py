@@ -7,6 +7,7 @@ Each command is responsible for a single task and does NOT trigger the next one.
 Usage:
   python main.py --config cluster-config.yaml deploy      # deploy cluster (no operators, no tests)
   python main.py --config cluster-config.yaml operators    # install AMD GPU operators (no tests)
+  python main.py --config cluster-config.yaml test-gpu     # run AMD GPU tests only
   python main.py --config cluster-config.yaml cleanup      # remove AMD GPU operator stack
   python main.py --config cluster-config.yaml delete       # delete the cluster
 """
@@ -57,6 +58,10 @@ Examples:
         help="Run only AMD GPU Operator and dependencies install (cluster must already exist)",
     )
     subparsers.add_parser(
+        "test-gpu",
+        help="Run AMD GPU verification tests (cluster must be ready with operators installed)",
+    )
+    subparsers.add_parser(
         "cleanup",
         help="Clean up AMD GPU Operator stack (reverse of operators install)",
     )
@@ -68,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     command = args.command
     if not command:
-        print("Error: no command specified. Use one of: deploy, delete, operators, cleanup", file=sys.stderr)
+        print("Error: no command specified. Use one of: deploy, delete, operators, test-gpu, cleanup", file=sys.stderr)
         return 1
 
     # Load configuration from file
@@ -144,6 +149,32 @@ def main(argv: list[str] | None = None) -> int:
             ocp_version=config.ocp_version,
         )
         install_operators(oc, config=op_config)
+
+    elif command == "test-gpu":
+        from tests.amd_gpu.runner import run_gpu_tests, run_gpu_tests_remote
+
+        kubeconfig_path = (
+            Path.home()
+            / ".kcli"
+            / "clusters"
+            / config.cluster_name
+            / "auth"
+            / "kubeconfig"
+        )
+        if not kubeconfig_path.exists():
+            print(f"Error: kubeconfig not found at {kubeconfig_path}", file=sys.stderr)
+            return 1
+
+        if config.remote.host:
+            rc = run_gpu_tests_remote(
+                config.remote.host,
+                config.remote.user,
+                kubeconfig_path,
+                ssh_key_path=config.remote.ssh_key_path,
+            )
+        else:
+            rc = run_gpu_tests(kubeconfig_path)
+        return rc
 
     elif command == "cleanup":
         from operators.cleanup import cleanup_operators
