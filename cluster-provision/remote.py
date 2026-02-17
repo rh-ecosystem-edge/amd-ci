@@ -10,89 +10,19 @@ from __future__ import annotations
 import base64
 import os
 import re
-import stat
 import subprocess
 import time
 from pathlib import Path
 from typing import Dict, Optional
 
 from common import DeployError, run
-
-
-# Base SSH options for non-interactive CI/CD use
-SSH_BASE_OPTS = (
-    "-o StrictHostKeyChecking=no "
-    "-o UserKnownHostsFile=/dev/null "
-    "-o LogLevel=ERROR "
-    "-o ConnectTimeout=30 "
-    "-o ServerAliveInterval=10 "
-    "-o ServerAliveCountMax=3 "
-    "-o BatchMode=yes"
+import shared.ssh as _ssh_mod
+from shared.ssh import (
+    set_ssh_key_path,
+    get_ssh_opts,
+    ssh_cmd,
+    scp_cmd,
 )
-
-# Module-level SSH key path (set via set_ssh_key_path)
-_ssh_key_path: Optional[str] = None
-
-
-def set_ssh_key_path(key_path: Optional[str]) -> None:
-    """
-    Set the SSH key path to use for all SSH connections.
-    Automatically fixes permissions to 600 if needed.
-    """
-    global _ssh_key_path
-    
-    if key_path:
-        key_file = Path(key_path)
-        
-        # Check if file exists
-        if not key_file.exists():
-            raise DeployError(f"SSH key file not found: {key_path}")
-        
-        # Fix permissions to 600 if needed
-        # SSH requires private keys to be readable only by owner
-        current_mode = key_file.stat().st_mode
-        required_mode = stat.S_IRUSR | stat.S_IWUSR  # 0o600
-        
-        if current_mode & 0o777 != 0o600:
-            print(f"Fixing SSH key permissions: {key_path} (chmod 600)")
-            key_file.chmod(0o600)
-        
-    _ssh_key_path = key_path
-
-
-def get_ssh_opts() -> str:
-    """Get SSH options, including identity file if configured."""
-    if _ssh_key_path:
-        return f"{SSH_BASE_OPTS} -i {_ssh_key_path}"
-    return SSH_BASE_OPTS
-
-
-def ssh_cmd(host: str, user: str, command: str, check: bool = True, timeout: int = 300) -> subprocess.CompletedProcess:
-    """Execute a command on the remote host via SSH."""
-    ssh_opts = get_ssh_opts()
-    full_cmd = f"ssh {ssh_opts} {user}@{host} {command!r}"
-    return subprocess.run(
-        full_cmd,
-        shell=True,
-        check=check,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-
-
-def scp_cmd(src: str, dest: str, timeout: int = 300) -> subprocess.CompletedProcess:
-    """Copy a file via SCP."""
-    ssh_opts = get_ssh_opts()
-    full_cmd = f"scp {ssh_opts} {src} {dest}"
-    return subprocess.run(
-        full_cmd,
-        shell=True,
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
 
 
 def check_ssh_connectivity(host: str, user: str) -> tuple[bool, str]:
@@ -403,12 +333,12 @@ def configure_kcli_remote_client(host: str, user: str) -> str:
     print(f"kcli client '{client_name}' configured for {user}@{host}")
     
     # If SSH key is configured, create SSH wrapper and config
-    if _ssh_key_path:
+    if _ssh_mod.ssh_key_path:
         # Use absolute path but don't resolve symlinks (keep /var/run as-is, not /run)
-        if Path(_ssh_key_path).is_absolute():
-            abs_key_path = _ssh_key_path
+        if Path(_ssh_mod.ssh_key_path).is_absolute():
+            abs_key_path = _ssh_mod.ssh_key_path
         else:
-            abs_key_path = str(Path(_ssh_key_path).absolute())
+            abs_key_path = str(Path(_ssh_mod.ssh_key_path).absolute())
         print(f"Configuring SSH wrapper for kcli to use key: {abs_key_path}")
         
         # Create SSH config (might help in some cases)
