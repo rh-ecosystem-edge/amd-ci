@@ -48,8 +48,7 @@ ENV DUMP_FAILED_TESTS=true
 COPY . .
 
 # Install Python dependencies
-RUN python3 -m pip install -r cluster-provision/requirements.txt && \
-    python3 -m pip install -r workflows/gpu_operator_versions/requirements.txt
+RUN python3 -m pip install -r requirements.txt
 
 # RUN make install-ginkgo
 RUN mkdir -p "${ARTIFACT_DIR}" && chmod 777 "${ARTIFACT_DIR}"

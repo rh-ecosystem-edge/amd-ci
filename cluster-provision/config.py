@@ -35,6 +35,16 @@ class NodeConfig:
 
 
 @dataclass
+class OperatorsConfig:
+    """Post-install AMD GPU Operator and dependencies (OLM) configuration."""
+
+    install: bool
+    machine_config_role: str
+    driver_version: str
+    enable_metrics: bool
+
+
+@dataclass
 class ClusterConfig:
     """Complete cluster configuration.
 
@@ -56,7 +66,7 @@ class ClusterConfig:
     pci_devices: list[str]
     wait_timeout: int
     version_channel: str
-
+    operators: OperatorsConfig
 
 def _expand_path(path: str | None) -> str | None:
     """Expand ~ and environment variables in a path."""
@@ -190,6 +200,14 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
         if isinstance(pci_devices, str):
             pci_devices = [d.strip() for d in pci_devices.replace(",", " ").split() if d.strip()]
 
+        operators_data = raw_config["operators"]
+        operators = OperatorsConfig(
+            install=operators_data["install"],
+            machine_config_role=operators_data["machine_config_role"],
+            driver_version=str(operators_data["driver_version"]),
+            enable_metrics=operators_data["enable_metrics"],
+        )
+
         return ClusterConfig(
             ocp_version=raw_config["ocp_version"],
             pull_secret_path=_expand_path(raw_config["pull_secret_path"]),
@@ -206,6 +224,7 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
             pci_devices=pci_devices,
             wait_timeout=raw_config["wait_timeout"],
             version_channel=raw_config["version_channel"],
+            operators=operators,
         )
     except KeyError as exc:
         raise KeyError(

@@ -29,3 +29,11 @@ remote:
 pci_devices: []
 wait_timeout: 3600
 version_channel: stable
+
+# Post-install: install AMD GPU Operator and dependencies (NFD, KMM) per OLM doc
+# https://instinct.docs.amd.com/projects/gpu-operator/en/release-v1.4.1/installation/openshift-olm.html
+operators:
+  install: false
+  machine_config_role: worker   # use "master" for Single Node OpenShift (SNO)
+  driver_version: "30.20.1"
+  enable_metrics: true

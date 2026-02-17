@@ -39,6 +39,10 @@ def deploy_cluster(
     """
     Main deployment flow, driven by the kcli parameters.
 
+    Deploys the cluster and waits for it to be ready. Does NOT install
+    operators or run tests — use the separate 'operators' and 'test-gpu'
+    commands for those.
+
     Args:
         params: Parameters dictionary (from config.get_kcli_params)
         remote_host: Remote libvirt host (None for local deployment)
@@ -70,7 +74,7 @@ def deploy_cluster(
 
     # Handle remote vs local deployment
     if remote_host:
-        _deploy_remote(
+        deploy_remote(
             params=params,
             cluster_name=cluster_name,
             api_ip=api_ip,
@@ -84,15 +88,19 @@ def deploy_cluster(
             pci_devices=pci_devices,
         )
     else:
-        _deploy_local(
+        deploy_local(
             params=params,
             ctlplanes=ctlplanes,
             workers=workers,
         )
 
 
-def _deploy_local(params: Dict[str, Any], ctlplanes: int, workers: int) -> None:
-    """Deploy OpenShift cluster locally."""
+def deploy_local(
+    params: Dict[str, Any],
+    ctlplanes: int,
+    workers: int,
+) -> None:
+    """Deploy OpenShift cluster locally using kcli."""
     ensure_kcli_config()
 
     topology = get_cluster_topology_description(ctlplanes, workers)
@@ -108,7 +116,7 @@ def _deploy_local(params: Dict[str, Any], ctlplanes: int, workers: int) -> None:
     print("Check 'kcli list' and the OpenShift console once the cluster is fully up.")
 
 
-def _deploy_remote(
+def deploy_remote(
     params: Dict[str, Any],
     cluster_name: str,
     api_ip: str,
@@ -223,7 +231,7 @@ def _deploy_remote(
                 stdout, _ = kcli_process.communicate(timeout=5)
                 print("\nkcli output:")
                 print(stdout)
-            except:
+            except Exception:
                 pass
             raise DeployError("Timeout waiting for VMs to be deployed (10 minutes)")
         
@@ -274,5 +282,5 @@ def _deploy_remote(
         domain=domain,
         kcli_client=kcli_client,
     )
-    
+
     print("\nDeployment completed successfully!")
