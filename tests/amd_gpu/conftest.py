@@ -25,14 +25,29 @@ def pytest_configure(config: pytest.Config) -> None:
 
 @pytest.fixture(scope="session")
 def load_kubeconfig():
-    """Load Kubernetes configuration once per session."""
+    """Load Kubernetes configuration once per session.
+
+    When ``KUBECONFIG`` is set explicitly, honour it even when running
+    inside a cluster so that tests target the intended cluster (e.g. a
+    remote GPU cluster reached via an SSH tunnel) rather than the CI
+    build cluster.
+    """
+    kubeconfig_env = os.environ.get("KUBECONFIG")
+    if kubeconfig_env:
+        try:
+            config.load_kube_config(config_file=kubeconfig_env)
+            return
+        except config.ConfigException as exc:
+            pytest.fail(
+                f"KUBECONFIG is set ({kubeconfig_env}) but could not be loaded: {exc}"
+            )
     try:
         config.load_incluster_config()
         return
     except config.ConfigException:
         pass
     try:
-        config.load_kube_config(config_file=os.environ.get("KUBECONFIG"))
+        config.load_kube_config()
     except config.ConfigException as exc:
         pytest.fail(
             f"Cannot load Kubernetes config. "

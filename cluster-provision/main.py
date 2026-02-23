@@ -149,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
             ocp_version=config.ocp_version,
         )
         install_operators(oc, config=op_config)
+        if hasattr(oc, "close"):
+            oc.close()
 
     elif command == "test-gpu":
         from tests.amd_gpu.runner import run_gpu_tests, run_gpu_tests_remote
@@ -201,6 +203,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             oc = LocalOcRunner(kubeconfig)
         cleanup_operators(oc)
+        if hasattr(oc, "close"):
+            oc.close()
 
     else:
         print(f"Unknown command: {command}", file=sys.stderr)

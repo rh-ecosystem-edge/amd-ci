@@ -56,7 +56,7 @@ class OperatorInstallConfig:
     registry_timeout: int = 120
     operator_timeout: int = 600
     cluster_stability_timeout: int = 900
-    gpu_ready_timeout: int = 900
+    gpu_ready_timeout: int = 1800
 
 
 def wait_for_cluster_stability(

@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Optional
 
 
+SSH_CONTROL_PATH = "/tmp/ssh-mux-%r@%h:%p"
+
 # Base SSH options for non-interactive CI/CD use
 SSH_BASE_OPTS = (
     "-o StrictHostKeyChecking=no "
@@ -22,7 +24,10 @@ SSH_BASE_OPTS = (
     "-o ConnectTimeout=30 "
     "-o ServerAliveInterval=10 "
     "-o ServerAliveCountMax=3 "
-    "-o BatchMode=yes"
+    "-o BatchMode=yes "
+    f"-o ControlPath={SSH_CONTROL_PATH} "
+    "-o ControlMaster=auto "
+    "-o ControlPersist=600"
 )
 
 # Module-level SSH key path (set via set_ssh_key_path)
@@ -67,14 +72,21 @@ def ssh_cmd(
     """Execute a command on the remote host via SSH."""
     ssh_opts = get_ssh_opts()
     full_cmd = f"ssh {ssh_opts} {user}@{host} {shlex.quote(command)}"
-    return subprocess.run(
-        full_cmd,
-        shell=True,
-        check=check,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    try:
+        return subprocess.run(
+            full_cmd,
+            shell=True,
+            check=check,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"  SSH command timed out after {timeout}s: {command[:80]}")
+        return subprocess.CompletedProcess(
+            args=full_cmd, returncode=1,
+            stdout="", stderr=f"SSH command timed out after {timeout}s",
+        )
 
 
 def scp_cmd(
@@ -93,3 +105,10 @@ def scp_cmd(
         text=True,
         timeout=timeout,
     )
+
+
+def close_ssh_multiplexing(host: str, user: str) -> None:
+    """Close the SSH ControlMaster connection for a given host."""
+    ssh_opts = get_ssh_opts()
+    cmd = f"ssh {ssh_opts} -O exit {user}@{host}"
+    subprocess.run(cmd, shell=True, capture_output=True, timeout=10)
