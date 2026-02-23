@@ -5,7 +5,6 @@ import unittest
 
 from workflows.gpu_operator_versions.update_versions import (
     calculate_diffs,
-    version2suffix,
     create_tests_matrix,
 )
 
@@ -103,34 +102,19 @@ class TestCalculateDiffs(unittest.TestCase):
         self.assertEqual(diff, expected)
 
 
-class TestVersion2Suffix(unittest.TestCase):
-    """Test cases for version2suffix function."""
-
-    def test_version2suffix_minor_version(self):
-        """Verify conversion of minor version format (X.Y)."""
-        self.assertEqual(version2suffix('1.0'), '1-0-x')
-        self.assertEqual(version2suffix('1.4'), '1-4-x')
-
-    def test_version2suffix_full_version(self):
-        """Verify conversion of full version format (X.Y.Z)."""
-        self.assertEqual(version2suffix('1.0.0'), '1-0-0-x')
-        self.assertEqual(version2suffix('1.4.0'), '1-4-0-x')
-        self.assertEqual(version2suffix('4.18.1'), '4-18-1-x')
-
-
 class TestCreateTestsMatrix(unittest.TestCase):
     """Test cases for create_tests_matrix function.
 
-    The create_tests_matrix function generates test combinations based on:
-    - New OCP versions: tested against all specified gpu_releases
-    - New GPU versions: tested against all ocp_releases (if GPU version is in gpu_releases)
+    The create_tests_matrix function determines which OCP versions need testing:
+    - New OCP versions trigger a test for that OCP version
+    - New GPU operator versions trigger tests for all OCP versions
     """
 
     def test_create_tests_matrix_gpu_version_in_releases(self):
         """Verify test generation for GPU version that is in releases list."""
         diff = {'gpu-operator': {'1.4': '1.4.1'}}
         tests = create_tests_matrix(diff, ['4.18', '4.19'], ['1.4', '1.5', '1.6'])
-        self.assertEqual(tests, {('4.18', '1.4'), ('4.19', '1.4')})
+        self.assertEqual(tests, {'4.18', '4.19'})
 
     def test_create_tests_matrix_gpu_version_not_in_releases(self):
         """Verify that GPU version not in releases list is skipped."""
@@ -142,25 +126,25 @@ class TestCreateTestsMatrix(unittest.TestCase):
         """Verify test generation for newly added GPU version."""
         diff = {'gpu-operator': {'1.6': '1.6.0'}}
         tests = create_tests_matrix(diff, ['4.18', '4.19'], ['1.5', '1.6'])
-        self.assertEqual(tests, {('4.18', '1.6'), ('4.19', '1.6')})
+        self.assertEqual(tests, {'4.18', '4.19'})
 
     def test_create_tests_matrix_ocp_version_changed(self):
         """Verify test generation for OCP version update."""
         diff = {'ocp': {'4.18': '4.18.2'}}
         tests = create_tests_matrix(diff, ['4.18', '4.19'], ['1.5', '1.6'])
-        self.assertEqual(tests, {('4.18', '1.5'), ('4.18', '1.6')})
+        self.assertEqual(tests, {'4.18'})
 
     def test_create_tests_matrix_new_ocp_version(self):
         """Verify test generation for newly added OCP version."""
         diff = {'ocp': {'4.20': '4.20.0'}}
         tests = create_tests_matrix(diff, ['4.18', '4.19', '4.20'], ['1.5', '1.6'])
-        self.assertEqual(tests, {('4.20', '1.5'), ('4.20', '1.6')})
+        self.assertEqual(tests, {'4.20'})
 
     def test_create_tests_matrix_limited_gpu_versions(self):
         """Verify test generation with limited GPU versions (GPU_VERSIONS_TO_TEST_COUNT)."""
         diff = {'ocp': {'4.21': '4.21.0'}}
         tests = create_tests_matrix(diff, ['4.18', '4.19', '4.20', '4.21'], ['1.6'])
-        self.assertEqual(tests, {('4.21', '1.6')})
+        self.assertEqual(tests, {'4.21'})
 
     def test_create_tests_matrix_both_ocp_and_gpu_changed(self):
         """Verify test generation when both OCP and GPU versions change."""
@@ -169,11 +153,7 @@ class TestCreateTestsMatrix(unittest.TestCase):
             'gpu-operator': {'1.6': '1.6.1'}
         }
         tests = create_tests_matrix(diff, ['4.18', '4.19', '4.20'], ['1.5', '1.6'])
-        expected = {
-            ('4.20', '1.5'), ('4.20', '1.6'),  # new OCP against all GPU
-            ('4.18', '1.6'), ('4.19', '1.6'),  # new GPU against all OCP
-        }
-        self.assertEqual(tests, expected)
+        self.assertEqual(tests, {'4.18', '4.19', '4.20'})
 
     def test_create_tests_matrix_no_changes(self):
         """Verify that empty diff produces no tests."""
@@ -181,11 +161,11 @@ class TestCreateTestsMatrix(unittest.TestCase):
         tests = create_tests_matrix(diff, ['4.18', '4.19'], ['1.4', '1.5'])
         self.assertEqual(tests, set())
 
-    def test_create_tests_matrix_empty_releases(self):
-        """Verify behavior with empty release lists."""
+    def test_create_tests_matrix_empty_gpu_releases(self):
+        """Verify OCP changes still trigger tests even with empty GPU releases."""
         diff = {'ocp': {'4.20': '4.20.0'}}
         tests = create_tests_matrix(diff, ['4.20'], [])
-        self.assertEqual(tests, set())
+        self.assertEqual(tests, {'4.20'})
 
 
 if __name__ == '__main__':
