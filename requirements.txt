@@ -1,6 +1,8 @@
-# Requirements for AMD GPU Operator CI Workflows
+# AMD GPU CI - Python dependencies
 # Install with: pip install -r requirements.txt
 
+PyYAML>=6.0
+pytest>=8.0
+kubernetes>=28.0.0
 requests>=2.31.0
 semver>=3.0.0
-

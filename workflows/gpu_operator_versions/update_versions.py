@@ -8,7 +8,7 @@ from workflows.gpu_operator_versions.version_utils import get_latest_versions
 from workflows.gpu_operator_versions.amd_gpu_operator import get_operator_versions
 
 # Constants
-test_command_template = "/test {ocp_version}-stable-amd-gpu-operator-e2e-{gpu_version}"
+test_command_template = "/test {ocp_version}-stable-e2e-amd-ci"
 
 
 def save_tests_commands(tests_commands: set, file_path: str):
@@ -20,45 +20,42 @@ def save_tests_commands(tests_commands: set, file_path: str):
 
 def create_tests_matrix(diffs: dict, ocp_releases: list, gpu_releases: list) -> set:
     """
-    Create a test matrix based on version changes.
+    Determine which OCP versions need testing based on version changes.
     
-    This generates test combinations for:
-    - New OpenShift versions (tested against GPU operator releases specified in gpu_releases)
-    - New GPU operator versions (tested against all OpenShift versions)
+    Triggers tests for:
+    - New/changed OpenShift versions
+    - All OpenShift versions when a GPU operator version changes
     
     Args:
         diffs: Dictionary of detected changes
         ocp_releases: List of OpenShift release versions
-        gpu_releases: List of GPU operator release versions to test new OCP versions against
-                      (either all versions or latest X, depending on configuration)
+        gpu_releases: List of active GPU operator release versions (used to filter
+                      irrelevant GPU version changes, e.g. updates to old versions)
         
     Returns:
-        set: Set of test tuples (ocp_version, gpu_version)
+        set: Set of OCP version strings that need testing
     """
-    tests = set()
+    ocp_versions_to_test = set()
 
     if "ocp" in diffs:
         logger.info(f'OpenShift versions changed: {diffs["ocp"]}')
-        logger.info(f'Testing new OCP versions against {len(gpu_releases)} GPU operator versions: {gpu_releases}')
         for ocp_version in diffs["ocp"]:
             if ocp_version not in ocp_releases:
                 logger.warning(f'OpenShift version "{ocp_version}" is not in the list of releases: {list(ocp_releases)}. '
                                f'This should not normally happen. Check if there was an update to an old version.')
-            for gpu_version in gpu_releases:
-                tests.add((ocp_version, gpu_version))
+            ocp_versions_to_test.add(ocp_version)
 
     if "gpu-operator" in diffs:
         logger.info(f'AMD GPU operator versions changed: {diffs["gpu-operator"]}')
-        logger.info(f'Testing new GPU operator versions against all {len(ocp_releases)} OCP versions')
+        logger.info(f'Testing against all {len(ocp_releases)} OCP versions')
         for gpu_version in diffs["gpu-operator"]:
             if gpu_version not in gpu_releases:
                 logger.warning(f'AMD GPU operator version "{gpu_version}" is not in the list of releases: {list(gpu_releases)}. '
                                f'This should not normally happen. Check if there was an update to an old version.')
                 continue
-            for ocp_version in ocp_releases:
-                tests.add((ocp_version, gpu_version))
+            ocp_versions_to_test.update(ocp_releases)
 
-    return tests
+    return ocp_versions_to_test
 
 
 def create_tests_commands(diffs: dict, ocp_releases: list, gpu_releases: list) -> set:
@@ -68,17 +65,13 @@ def create_tests_commands(diffs: dict, ocp_releases: list, gpu_releases: list) -
     Args:
         diffs: Dictionary of detected changes
         ocp_releases: List of OpenShift release versions
-        gpu_releases: List of GPU operator release versions to test new OCP versions against
+        gpu_releases: List of active GPU operator release versions
         
     Returns:
         set: Set of test command strings
     """
-    tests_commands = set()
-    tests = create_tests_matrix(diffs, ocp_releases, gpu_releases)
-    for t in tests:
-        gpu_version_suffix = version2suffix(t[1])
-        tests_commands.add(test_command_template.format(ocp_version=t[0], gpu_version=gpu_version_suffix))
-    return tests_commands
+    ocp_versions = create_tests_matrix(diffs, ocp_releases, gpu_releases)
+    return {test_command_template.format(ocp_version=v) for v in ocp_versions}
 
 
 def calculate_diffs(old_versions: dict, new_versions: dict) -> dict:
@@ -105,11 +98,6 @@ def calculate_diffs(old_versions: dict, new_versions: dict) -> dict:
                 diffs[key] = value
 
     return diffs
-
-
-def version2suffix(v: str):
-    """Convert version to test suffix format."""
-    return f'{v.replace(".", "-")}-x'
 
 
 def main():
