@@ -13,7 +13,7 @@ import re
 import subprocess
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
 from common import DeployError, run
 import shared.ssh as _ssh_mod
@@ -526,6 +526,7 @@ def attach_pci_devices(
     user: str,
     vm_name: str,
     pci_devices: list[str],
+    pre_start_hook: Optional[Callable[[], None]] = None,
 ) -> None:
     """
     Attach PCI devices to a VM for GPU passthrough.
@@ -533,13 +534,16 @@ def attach_pci_devices(
     This function:
     1. Shuts down the VM gracefully
     2. Attaches each PCI device via virsh
-    3. Starts the VM back up
+    3. Calls ``pre_start_hook`` (if provided) while the VM is still off
+    4. Starts the VM back up
     
     Args:
         host: Remote host IP/hostname
         user: SSH user
         vm_name: Name of the VM (e.g., "sno-ctlplane-0")
         pci_devices: List of PCI addresses (e.g., ["0000:b3:00.0"])
+        pre_start_hook: Optional callable invoked while the VM is shut off,
+            after PCI devices are attached but before the VM is started.
     """
     print(f"Attaching {len(pci_devices)} PCI device(s) to VM '{vm_name}'...")
     
@@ -619,6 +623,10 @@ def attach_pci_devices(
     hostdev_count = int(result.stdout.strip()) if result.stdout.strip().isdigit() else 0
     print(f"    Found {hostdev_count} hostdev entries in VM config.")
     
+    # Run pre-start hook while VM is still off (e.g. guestfish storage fix)
+    if pre_start_hook:
+        pre_start_hook()
+
     # Start VM back up
     print(f"  Starting VM '{vm_name}'...")
     ssh_cmd(host, user, f"virsh start {vm_name}", check=True)
