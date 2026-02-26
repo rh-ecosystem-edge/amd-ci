@@ -1,5 +1,4 @@
 FROM quay.io/openshift/origin-cli:4.20 as oc-cli
-FROM quay.io/karmab/kcli:latest as kcli-cli
 FROM registry.access.redhat.com/ubi9/go-toolset:1.24.4
 
 LABEL org.opencontainers.image.authors="Red Hat Ecosystem Engineering"
@@ -10,6 +9,8 @@ COPY --from=oc-cli /usr/bin/oc /usr/bin/oc
 
 # Install dependencies: `operator-sdk`
 ARG OPERATOR_SDK_VERSION=v1.6.2
+# Pin kcli to a stable version to avoid CI breakage from upstream changes
+ARG KCLI_VERSION=99.0.202512181223
 RUN ARCH=$(case $(uname -m) in x86_64) echo -n amd64 ;; aarch64) echo -n arm64 ;; *) echo -n $(uname -m) ;; esac) && \
     OS=$(uname | awk '{print tolower($0)}') && \
     OPERATOR_SDK_DL_URL=https://github.com/operator-framework/operator-sdk/releases/download/${OPERATOR_SDK_VERSION} && \
@@ -28,9 +29,9 @@ RUN echo -e '[centos-stream-crb]\nname=CentOS Stream 9 - CRB\nbaseurl=https://mi
     ln -sf /usr/bin/python3.12 /usr/local/bin/python && \
     dnf clean all
 
-# Install kcli and libvirt-python for both python3.12 and system python3
-RUN python3.12 -m pip install kcli libvirt-python && \
-    python3 -m pip install kcli libvirt-python || true
+# Install kcli (pinned version) and libvirt-python for both python3.12 and system python3
+RUN python3.12 -m pip install kcli==${KCLI_VERSION} libvirt-python && \
+    python3 -m pip install kcli==${KCLI_VERSION} libvirt-python || true
 
 # Get the source code in there
 WORKDIR /root/amd-ci
