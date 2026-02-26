@@ -1,14 +1,6 @@
-"""Version comparison utilities shared across AMD GPU operator workflows."""
+"""Version comparison utilities for AMD GPU operator workflows."""
 
-from semver import Version
-
-
-def max_version(a: str, b: str) -> str:
-    """
-    Parse and compare two semver versions.
-    Return the higher of them.
-    """
-    return str(max(map(Version.parse, (a, b))))
+from shared.version_utils import max_version
 
 def get_latest_versions(versions: list, count: int) -> list:
     if count <= 0:

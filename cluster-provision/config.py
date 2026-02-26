@@ -39,6 +39,7 @@ class OperatorsConfig:
     """Post-install AMD GPU Operator and dependencies (OLM) configuration."""
 
     install: bool
+    gpu_operator_version: str
     machine_config_role: str
     driver_version: str
     enable_metrics: bool
@@ -203,6 +204,7 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
         operators_data = raw_config["operators"]
         operators = OperatorsConfig(
             install=operators_data["install"],
+            gpu_operator_version=str(operators_data["gpu_operator_version"]),
             machine_config_role=operators_data["machine_config_role"],
             driver_version=str(operators_data["driver_version"]),
             enable_metrics=operators_data["enable_metrics"],

@@ -45,6 +45,8 @@ class OperatorInstallConfig:
 
     # MachineConfig role: "master" for SNO, "worker" for multi-node
     machine_config_role: str = "worker"
+    # Full AMD GPU Operator version to install (e.g. "1.4.1"); used as startingCSV
+    gpu_operator_version: str = "1.4.1"
     # ROCm/amdgpu driver version (e.g. 30.20.1)
     driver_version: str = "30.20.1"
     # Enable metrics exporter and ServiceMonitor
@@ -317,7 +319,11 @@ def install_operators(
     wait_for_mcp_updated(oc)
     wait_for_cluster_stability(oc, timeout=cfg.cluster_stability_timeout)
 
-    install_all_operators(oc, timeout_per_operator=cfg.operator_timeout)
+    install_all_operators(
+        oc,
+        gpu_operator_version=cfg.gpu_operator_version,
+        timeout_per_operator=cfg.operator_timeout,
+    )
 
     create_nfd_instance(oc, ocp_version=cfg.ocp_version)
     create_nfd_feature_rule(oc)
