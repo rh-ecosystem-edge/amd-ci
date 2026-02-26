@@ -353,11 +353,21 @@ def install_kmm(oc: OcRunner, timeout: int = 600) -> None:
     print("  KMM Operator installed.")
 
 
-def install_amd_gpu_operator(oc: OcRunner, timeout: int = 600) -> None:
-    """Install certified AMD GPU Operator in openshift-amd-gpu."""
-    print("Installing AMD GPU Operator (certified)...")
+def install_amd_gpu_operator(
+    oc: OcRunner,
+    gpu_operator_version: str,
+    timeout: int = 600,
+) -> None:
+    """Install certified AMD GPU Operator in openshift-amd-gpu.
+
+    Args:
+        oc: OcRunner instance.
+        gpu_operator_version: Full version (e.g. "1.4.1") to pin via startingCSV.
+        timeout: Seconds to wait for CSV to succeed.
+    """
+    starting_csv = f"amd-gpu-operator.v{gpu_operator_version}"
+    print(f"Installing AMD GPU Operator (certified) version {gpu_operator_version} (CSV: {starting_csv})...")
     ensure_namespace(oc, NAMESPACE_AMD_GPU)
-    # AMD GPU Operator does not support OwnNamespace; use AllNamespaces like KMM
     create_operator_group(oc, NAMESPACE_AMD_GPU, "openshift-amd-gpu", all_namespaces=True)
     create_subscription(
         oc,
@@ -366,6 +376,7 @@ def install_amd_gpu_operator(oc: OcRunner, timeout: int = 600) -> None:
         AMD_GPU_PACKAGE,
         AMD_GPU_CATALOG,
         AMD_GPU_CHANNEL,
+        starting_csv=starting_csv,
     )
     installed_csv = wait_for_subscription_installed(
         oc, NAMESPACE_AMD_GPU, "amd-gpu-operator", timeout=timeout
@@ -374,8 +385,12 @@ def install_amd_gpu_operator(oc: OcRunner, timeout: int = 600) -> None:
     print("  AMD GPU Operator installed.")
 
 
-def install_all_operators(oc: OcRunner, timeout_per_operator: int = 600) -> None:
+def install_all_operators(
+    oc: OcRunner,
+    gpu_operator_version: str,
+    timeout_per_operator: int = 600,
+) -> None:
     """Install NFD, then KMM, then AMD GPU Operator (order per doc)."""
     install_nfd(oc, timeout=timeout_per_operator)
     install_kmm(oc, timeout=timeout_per_operator)
-    install_amd_gpu_operator(oc, timeout=timeout_per_operator)
+    install_amd_gpu_operator(oc, gpu_operator_version=gpu_operator_version, timeout=timeout_per_operator)

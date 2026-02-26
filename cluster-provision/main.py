@@ -117,6 +117,7 @@ def main(argv: list[str] | None = None) -> int:
 
     elif command == "operators":
         from operators.main import install_operators, OperatorInstallConfig
+        from operators.version_resolver import resolve_latest_patch
         from shared.oc_runner import LocalOcRunner
 
         if config.remote.host and config.remote.ssh_key_path:
@@ -139,11 +140,15 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Error: kubeconfig not found at {kubeconfig}", file=sys.stderr)
                 return 1
             oc = LocalOcRunner(kubeconfig)
+
+        gpu_version = resolve_latest_patch(config.operators.gpu_operator_version)
+
         machine_config_role = config.operators.machine_config_role
         if config.ctlplanes == 1 and config.workers == 0:
             machine_config_role = "master"
         op_config = OperatorInstallConfig(
             machine_config_role=machine_config_role,
+            gpu_operator_version=gpu_version,
             driver_version=config.operators.driver_version,
             enable_metrics=config.operators.enable_metrics,
             ocp_version=config.ocp_version,
