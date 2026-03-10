@@ -54,14 +54,22 @@ class LocalOcRunner(OcRunner):
         stdin: Optional[str] = None,
     ) -> subprocess.CompletedProcess:
         env = {**os.environ, "KUBECONFIG": str(self.kubeconfig)}
-        return subprocess.run(
-            ["oc"] + list(args),
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            input=stdin,
-        )
+        try:
+            return subprocess.run(
+                ["oc"] + list(args),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                input=stdin,
+            )
+        except subprocess.TimeoutExpired as e:
+            return subprocess.CompletedProcess(
+                args=["oc"] + list(args),
+                returncode=124,
+                stdout=(e.stdout or b"").decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or ""),
+                stderr=f"Command timed out after {timeout}s",
+            )
 
     def apply_yaml(self, yaml_content: str, timeout: int = 120) -> None:
         r = self.oc("apply", "-f", "-", timeout=timeout, stdin=yaml_content)

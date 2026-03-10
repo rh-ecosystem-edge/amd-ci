@@ -2,11 +2,11 @@
 
 import unittest
 
-from workflows.gpu_operator_versions.amd_gpu_operator import _parse_versions_from_tags
+from shared.amd_gpu_releases import parse_versions_from_tags
 
 
 class TestParseVersionsFromTags(unittest.TestCase):
-    """Test cases for _parse_versions_from_tags function.
+    """Test cases for parse_versions_from_tags function.
 
     This function parses GitHub release tags and categorizes versions as:
     - certified: versions with at least one non-zero patch release
@@ -20,7 +20,7 @@ class TestParseVersionsFromTags(unittest.TestCase):
             "gpu-operator-charts-v1.0.2",
             "gpu-operator-charts-v1.1.1",
         ]
-        certified, pending = _parse_versions_from_tags(tags)
+        certified, pending = parse_versions_from_tags(tags)
 
         self.assertEqual(certified, {"1.0": "1.0.2", "1.1": "1.1.1"})
         self.assertEqual(pending, {})
@@ -28,7 +28,7 @@ class TestParseVersionsFromTags(unittest.TestCase):
     def test_parse_versions_simple_v_prefix_format(self):
         """Verify parsing of simple vX.Y.Z tag format."""
         tags = ["v1.0.1", "v1.0.2", "v1.1.1"]
-        certified, pending = _parse_versions_from_tags(tags)
+        certified, pending = parse_versions_from_tags(tags)
 
         self.assertEqual(certified, {"1.0": "1.0.2", "1.1": "1.1.1"})
         self.assertEqual(pending, {})
@@ -36,7 +36,7 @@ class TestParseVersionsFromTags(unittest.TestCase):
     def test_parse_versions_no_prefix_format(self):
         """Verify parsing of X.Y.Z tag format without prefix."""
         tags = ["1.0.1", "1.1.2"]
-        certified, pending = _parse_versions_from_tags(tags)
+        certified, pending = parse_versions_from_tags(tags)
 
         self.assertEqual(certified, {"1.0": "1.0.1", "1.1": "1.1.2"})
         self.assertEqual(pending, {})
@@ -47,7 +47,7 @@ class TestParseVersionsFromTags(unittest.TestCase):
             "gpu-operator-charts-v1.0.1",  # certified (patch > 0)
             "gpu-operator-charts-v1.1.0",  # pending (only patch 0)
         ]
-        certified, pending = _parse_versions_from_tags(tags)
+        certified, pending = parse_versions_from_tags(tags)
 
         self.assertEqual(certified, {"1.0": "1.0.1"})
         self.assertEqual(pending, {"1.1": "1.1.0"})
@@ -58,7 +58,7 @@ class TestParseVersionsFromTags(unittest.TestCase):
             "gpu-operator-charts-v1.2.0",  # initially pending
             "gpu-operator-charts-v1.2.1",  # makes 1.2 certified
         ]
-        certified, pending = _parse_versions_from_tags(tags)
+        certified, pending = parse_versions_from_tags(tags)
 
         self.assertEqual(certified, {"1.2": "1.2.1"})
         self.assertEqual(pending, {})
@@ -70,7 +70,7 @@ class TestParseVersionsFromTags(unittest.TestCase):
             "gpu-operator-charts-v1.0.5",
             "gpu-operator-charts-v1.0.3",
         ]
-        certified, pending = _parse_versions_from_tags(tags)
+        certified, pending = parse_versions_from_tags(tags)
 
         self.assertEqual(certified, {"1.0": "1.0.5"})
         self.assertEqual(pending, {})
@@ -84,14 +84,14 @@ class TestParseVersionsFromTags(unittest.TestCase):
             "latest",
             "gpu-operator-charts-v1.1.1",
         ]
-        certified, pending = _parse_versions_from_tags(tags)
+        certified, pending = parse_versions_from_tags(tags)
 
         self.assertEqual(certified, {"1.0": "1.0.1", "1.1": "1.1.1"})
         self.assertEqual(pending, {})
 
     def test_parse_versions_empty_tags_list(self):
         """Verify handling of empty tags list."""
-        certified, pending = _parse_versions_from_tags([])
+        certified, pending = parse_versions_from_tags([])
 
         self.assertEqual(certified, {})
         self.assertEqual(pending, {})
@@ -103,7 +103,7 @@ class TestParseVersionsFromTags(unittest.TestCase):
             "v1.1.1",
             "1.2.1",
         ]
-        certified, pending = _parse_versions_from_tags(tags)
+        certified, pending = parse_versions_from_tags(tags)
 
         self.assertEqual(certified, {"1.0": "1.0.1", "1.1": "1.1.1", "1.2": "1.2.1"})
         self.assertEqual(pending, {})
@@ -115,7 +115,7 @@ class TestParseVersionsFromTags(unittest.TestCase):
             "gpu-operator-charts-v2.0.1",
             "gpu-operator-charts-v2.1.0",  # pending (patch 0 only)
         ]
-        certified, pending = _parse_versions_from_tags(tags)
+        certified, pending = parse_versions_from_tags(tags)
 
         self.assertEqual(certified, {"1.0": "1.0.1", "2.0": "2.0.1"})
         self.assertEqual(pending, {"2.1": "2.1.0"})
@@ -127,7 +127,7 @@ class TestParseVersionsFromTags(unittest.TestCase):
             "gpu-operator-charts-v1.1.0",
             "gpu-operator-charts-v1.2.0",
         ]
-        certified, pending = _parse_versions_from_tags(tags)
+        certified, pending = parse_versions_from_tags(tags)
 
         self.assertEqual(certified, {})
         self.assertEqual(pending, {"1.0": "1.0.0", "1.1": "1.1.0", "1.2": "1.2.0"})
@@ -138,7 +138,7 @@ class TestParseVersionsFromTags(unittest.TestCase):
             "gpu-operator-charts-v10.20.30",
             "gpu-operator-charts-v10.20.31",
         ]
-        certified, pending = _parse_versions_from_tags(tags)
+        certified, pending = parse_versions_from_tags(tags)
 
         self.assertEqual(certified, {"10.20": "10.20.31"})
         self.assertEqual(pending, {})

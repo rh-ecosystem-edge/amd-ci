@@ -71,7 +71,9 @@ def create_subscription(
     catalog: str,
     channel: str,
     starting_csv: str | None = None,
+    manual_approval: bool = False,
 ) -> None:
+    approval = "Manual" if manual_approval else "Automatic"
     starting_csv_block = ""
     if starting_csv:
         starting_csv_block = f"\n  startingCSV: {starting_csv}"
@@ -82,13 +84,47 @@ metadata:
   namespace: {namespace}
 spec:
   channel: {channel}
-  installPlanApproval: Automatic
+  installPlanApproval: {approval}
   name: {package}
   source: {catalog}
   sourceNamespace: openshift-marketplace
 {starting_csv_block}
 """
     oc.apply_yaml(yaml)
+
+
+def approve_install_plan(
+    oc: OcRunner, namespace: str, csv_name: str, timeout: int = 300
+) -> None:
+    """Wait for an InstallPlan targeting csv_name and approve it."""
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
+        r = oc.oc(
+            "get", "installplan", "-n", namespace, "-o", "json",
+            timeout=15,
+        )
+        if r.returncode == 0 and r.stdout:
+            try:
+                items = json.loads(r.stdout).get("items", [])
+            except json.JSONDecodeError:
+                items = []
+            for ip in items:
+                csvs = (ip.get("spec") or {}).get("clusterServiceVersionNames") or []
+                approved = (ip.get("spec") or {}).get("approved", False)
+                if csv_name in csvs and not approved:
+                    ip_name = ip["metadata"]["name"]
+                    print(f"  Approving InstallPlan {ip_name} for {csv_name}...")
+                    patch_r = oc.oc(
+                        "patch", "installplan", ip_name, "-n", namespace,
+                        "--type", "merge", "-p", '{"spec":{"approved":true}}',
+                        timeout=15,
+                    )
+                    if patch_r.returncode != 0:
+                        print(f"  Patch failed (rc={patch_r.returncode}): {patch_r.stderr or patch_r.stdout}, retrying...")
+                        break
+                    return
+        time.sleep(10)
+    raise OperatorError(f"Timeout ({timeout}s) waiting for InstallPlan for {csv_name}")
 
 
 def wait_for_csv(oc: OcRunner, namespace: str, timeout: int = 600) -> None:
@@ -353,11 +389,21 @@ def install_kmm(oc: OcRunner, timeout: int = 600) -> None:
     print("  KMM Operator installed.")
 
 
-def install_amd_gpu_operator(oc: OcRunner, timeout: int = 600) -> None:
-    """Install certified AMD GPU Operator in openshift-amd-gpu."""
-    print("Installing AMD GPU Operator (certified)...")
+def install_amd_gpu_operator(
+    oc: OcRunner,
+    gpu_operator_version: str,
+    timeout: int = 600,
+) -> None:
+    """Install certified AMD GPU Operator in openshift-amd-gpu.
+
+    Args:
+        oc: OcRunner instance.
+        gpu_operator_version: Full version (e.g. "1.4.1") to pin via startingCSV.
+        timeout: Seconds to wait for CSV to succeed.
+    """
+    starting_csv = f"amd-gpu-operator.v{gpu_operator_version}"
+    print(f"Installing AMD GPU Operator (certified) version {gpu_operator_version} (CSV: {starting_csv})...")
     ensure_namespace(oc, NAMESPACE_AMD_GPU)
-    # AMD GPU Operator does not support OwnNamespace; use AllNamespaces like KMM
     create_operator_group(oc, NAMESPACE_AMD_GPU, "openshift-amd-gpu", all_namespaces=True)
     create_subscription(
         oc,
@@ -366,16 +412,20 @@ def install_amd_gpu_operator(oc: OcRunner, timeout: int = 600) -> None:
         AMD_GPU_PACKAGE,
         AMD_GPU_CATALOG,
         AMD_GPU_CHANNEL,
+        starting_csv=starting_csv,
+        manual_approval=True,
     )
-    installed_csv = wait_for_subscription_installed(
-        oc, NAMESPACE_AMD_GPU, "amd-gpu-operator", timeout=timeout
-    )
-    wait_for_csv_by_name(oc, NAMESPACE_AMD_GPU, installed_csv, timeout=timeout)
+    approve_install_plan(oc, NAMESPACE_AMD_GPU, starting_csv, timeout=timeout)
+    wait_for_csv_by_name(oc, NAMESPACE_AMD_GPU, starting_csv, timeout=timeout)
     print("  AMD GPU Operator installed.")
 
 
-def install_all_operators(oc: OcRunner, timeout_per_operator: int = 600) -> None:
+def install_all_operators(
+    oc: OcRunner,
+    gpu_operator_version: str,
+    timeout_per_operator: int = 600,
+) -> None:
     """Install NFD, then KMM, then AMD GPU Operator (order per doc)."""
     install_nfd(oc, timeout=timeout_per_operator)
     install_kmm(oc, timeout=timeout_per_operator)
-    install_amd_gpu_operator(oc, timeout=timeout_per_operator)
+    install_amd_gpu_operator(oc, gpu_operator_version=gpu_operator_version, timeout=timeout_per_operator)
