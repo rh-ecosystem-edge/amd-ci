@@ -71,7 +71,9 @@ def create_subscription(
     catalog: str,
     channel: str,
     starting_csv: str | None = None,
+    manual_approval: bool = False,
 ) -> None:
+    approval = "Manual" if manual_approval else "Automatic"
     starting_csv_block = ""
     if starting_csv:
         starting_csv_block = f"\n  startingCSV: {starting_csv}"
@@ -82,13 +84,47 @@ metadata:
   namespace: {namespace}
 spec:
   channel: {channel}
-  installPlanApproval: Automatic
+  installPlanApproval: {approval}
   name: {package}
   source: {catalog}
   sourceNamespace: openshift-marketplace
 {starting_csv_block}
 """
     oc.apply_yaml(yaml)
+
+
+def approve_install_plan(
+    oc: OcRunner, namespace: str, csv_name: str, timeout: int = 300
+) -> None:
+    """Wait for an InstallPlan targeting csv_name and approve it."""
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
+        r = oc.oc(
+            "get", "installplan", "-n", namespace, "-o", "json",
+            timeout=15,
+        )
+        if r.returncode == 0 and r.stdout:
+            try:
+                items = json.loads(r.stdout).get("items", [])
+            except json.JSONDecodeError:
+                items = []
+            for ip in items:
+                csvs = (ip.get("spec") or {}).get("clusterServiceVersionNames") or []
+                approved = (ip.get("spec") or {}).get("approved", False)
+                if csv_name in csvs and not approved:
+                    ip_name = ip["metadata"]["name"]
+                    print(f"  Approving InstallPlan {ip_name} for {csv_name}...")
+                    patch_r = oc.oc(
+                        "patch", "installplan", ip_name, "-n", namespace,
+                        "--type", "merge", "-p", '{"spec":{"approved":true}}',
+                        timeout=15,
+                    )
+                    if patch_r.returncode != 0:
+                        print(f"  Patch failed (rc={patch_r.returncode}): {patch_r.stderr or patch_r.stdout}, retrying...")
+                        break
+                    return
+        time.sleep(10)
+    raise OperatorError(f"Timeout ({timeout}s) waiting for InstallPlan for {csv_name}")
 
 
 def wait_for_csv(oc: OcRunner, namespace: str, timeout: int = 600) -> None:
@@ -377,11 +413,10 @@ def install_amd_gpu_operator(
         AMD_GPU_CATALOG,
         AMD_GPU_CHANNEL,
         starting_csv=starting_csv,
+        manual_approval=True,
     )
-    installed_csv = wait_for_subscription_installed(
-        oc, NAMESPACE_AMD_GPU, "amd-gpu-operator", timeout=timeout
-    )
-    wait_for_csv_by_name(oc, NAMESPACE_AMD_GPU, installed_csv, timeout=timeout)
+    approve_install_plan(oc, NAMESPACE_AMD_GPU, starting_csv, timeout=timeout)
+    wait_for_csv_by_name(oc, NAMESPACE_AMD_GPU, starting_csv, timeout=timeout)
     print("  AMD GPU Operator installed.")
 
 
