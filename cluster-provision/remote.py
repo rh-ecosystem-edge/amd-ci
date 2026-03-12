@@ -48,6 +48,158 @@ def check_ssh_connectivity(host: str, user: str) -> tuple[bool, str]:
         return False, f"SSH connection failed: {str(e)}"
 
 
+def _resolve_vfio_ids(
+    host: str, user: str, pci_devices: list[str]
+) -> list[str]:
+    """Resolve PCI bus addresses to vendor:device IDs on the remote host.
+
+    Validates each address format, then queries ``lspci`` to obtain the
+    vendor:device ID (e.g. ``1002:740f``).
+
+    Returns:
+        De-duplicated list of vendor:device ID strings.
+    """
+    pci_addr_re = re.compile(
+        r"^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-9a-fA-F]$"
+    )
+
+    vfio_ids: list[str] = []
+    for addr in pci_devices:
+        if not pci_addr_re.match(addr):
+            raise DeployError(
+                f"Invalid PCI address format: '{addr}'. "
+                f"Expected format: 0000:b3:00.0"
+            )
+        result = ssh_cmd(host, user, f"lspci -ns {addr}", check=False)
+        if result.returncode != 0 or not result.stdout.strip():
+            raise DeployError(f"PCI device {addr} not found on host {host}")
+        # lspci -ns output example: "b3:00.0 0300: 1002:740f (rev c8)"
+        match = re.search(r"[\da-fA-F]{4}:[\da-fA-F]{4}", result.stdout)
+        if not match:
+            raise DeployError(
+                f"Could not parse vendor:device ID from lspci output for {addr}: "
+                f"{result.stdout.strip()}"
+            )
+        vid = match.group(0)
+        if vid not in vfio_ids:
+            vfio_ids.append(vid)
+
+    return vfio_ids
+
+
+def _get_required_iommu_params(
+    host: str, user: str, vfio_ids: list[str]
+) -> list[str]:
+    """Build the list of kernel parameters required for PCI passthrough.
+
+    Detects the CPU vendor to choose ``intel_iommu=on`` or ``amd_iommu=on``.
+    """
+    cpu_info = ssh_cmd(host, user, "grep -m1 vendor_id /proc/cpuinfo", check=True).stdout
+    if "AuthenticAMD" in cpu_info:
+        iommu_param = "amd_iommu=on"
+    else:
+        iommu_param = "intel_iommu=on"
+
+    return [
+        iommu_param,
+        "iommu=pt",
+        "rd.driver.pre=vfio-pci",
+        f"vfio-pci.ids={','.join(vfio_ids)}",
+    ]
+
+
+def _reboot_and_wait(host: str, user: str, timeout: int = 300) -> None:
+    """Reboot the remote host and wait for it to come back.
+
+    Waits for SSH to fail (host going down), then waits for SSH to
+    succeed (host back up).
+    """
+    ssh_cmd(host, user, "reboot", check=False)
+
+    start = time.time()
+
+    print("  Waiting for host to go down...")
+    while time.time() - start < timeout:
+        time.sleep(5)
+        ok, _ = check_ssh_connectivity(host, user)
+        if not ok:
+            print("  Host is down.")
+            break
+    else:
+        raise DeployError(
+            f"Host {host} did not go down after reboot within {timeout}s"
+        )
+
+    print("  Waiting for host to come back...")
+    while time.time() - start < timeout:
+        time.sleep(15)
+        ok, _ = check_ssh_connectivity(host, user)
+        if ok:
+            break
+        elapsed = int(time.time() - start)
+        print(f"  Waiting for host to come back... ({elapsed}s)")
+    else:
+        raise DeployError(
+            f"Host {host} did not come back after reboot within {timeout}s"
+        )
+
+
+def ensure_host_pci_passthrough(
+    host: str, user: str, pci_devices: list[str]
+) -> None:
+    """Ensure IOMMU and vfio-pci kernel parameters are set on the remote host.
+
+    Checks ``/proc/cmdline`` for the required parameters.  If any are missing,
+    updates the kernel command line via ``grubby`` and reboots the host.
+
+    Any pre-existing ``vfio-pci.ids`` value is replaced with the new one so
+    that repeated invocations with different devices never create duplicates.
+    """
+    print(f"  Checking PCI passthrough configuration on {host}...")
+
+    vfio_ids = _resolve_vfio_ids(host, user, pci_devices)
+    required_params = _get_required_iommu_params(host, user, vfio_ids)
+
+    cmdline = ssh_cmd(host, user, "cat /proc/cmdline", check=True).stdout.strip()
+    missing = [p for p in required_params if p not in cmdline]
+
+    if not missing:
+        print("  PCI passthrough already configured, no reboot needed.")
+        return
+
+    # Remove any stale vfio-pci.ids before adding the new value
+    old_vfio = re.search(r"vfio-pci\.ids=(\S+)", cmdline)
+    if old_vfio:
+        ssh_cmd(
+            host, user,
+            f"grubby --update-kernel=ALL --remove-args='vfio-pci.ids={old_vfio.group(1)}'",
+            check=True,
+        )
+
+    print(f"  Missing kernel parameters: {' '.join(missing)}")
+    print("  Updating kernel command line via grubby...")
+
+    grubby_args = " ".join(missing)
+    ssh_cmd(
+        host, user,
+        f"grubby --update-kernel=ALL --args='{grubby_args}'",
+        check=True,
+    )
+
+    print("  Rebooting host to apply kernel parameters...")
+    _reboot_and_wait(host, user)
+
+    new_cmdline = ssh_cmd(host, user, "cat /proc/cmdline", check=True).stdout.strip()
+    still_missing = [p for p in required_params if p not in new_cmdline]
+    if still_missing:
+        raise DeployError(
+            f"Kernel parameters missing after reboot: {' '.join(still_missing)}\n"
+            f"Current cmdline: {new_cmdline}"
+        )
+
+    print("  PCI passthrough enabled successfully.")
+
+
 def setup_remote_libvirt(host: str, user: str) -> None:
     """
     Set up libvirt and prerequisites on the remote host.
