@@ -224,6 +224,9 @@ def build_files_lookup(
     return build_files, all_builds
 
 
+GPU_VERSION_RESOLVED_REGEX = re.compile(r"Resolved AMD GPU Operator \S+ -> (\S+)")
+
+
 def format_gpu_version(gpu_suffix: str) -> str:
     """Convert GPU version suffix from job name to display format.
 
@@ -233,6 +236,46 @@ def format_gpu_version(gpu_suffix: str) -> str:
     if gpu_suffix == "master":
         return "master"
     return gpu_suffix.replace("-", ".")
+
+
+def fetch_exact_ocp_version(build_base_path: str) -> Optional[str]:
+    """Fetch the exact OCP version from the release-images-latest artifact.
+
+    The file is an ImageStream JSON with metadata.name containing the full version (e.g. '4.20.17').
+    """
+    release_path = f"{build_base_path}/artifacts/release/artifacts/release-images-latest"
+    try:
+        content = fetch_gcs_file_content(release_path)
+        data = json.loads(content)
+        return data.get("metadata", {}).get("name")
+    except Exception as e:
+        logger.warning(f"Could not fetch exact OCP version from {release_path}: {e}")
+        return None
+
+
+def fetch_exact_gpu_version(build_base_path: str, e2e_step_name: str) -> Optional[str]:
+    """Fetch the exact GPU operator version from the install-operators build log.
+
+    Parses the line: 'Resolved AMD GPU Operator X.Y -> X.Y.Z'
+    """
+    log_path = f"{build_base_path}/artifacts/{e2e_step_name}/amd-gpu-operator-install-operators/build-log.txt"
+    try:
+        content = fetch_gcs_file_content(log_path)
+        match = GPU_VERSION_RESOLVED_REGEX.search(content)
+        if match:
+            return match.group(1)
+        logger.warning(f"Could not parse GPU operator version from {log_path}")
+        return None
+    except Exception as e:
+        logger.warning(f"Could not fetch GPU operator version from {log_path}: {e}")
+        return None
+
+
+def get_build_base_path(finished_file_path: str) -> str:
+    """Get the base build path (up to build_id) from a finished.json path."""
+    if '/artifacts/' in finished_file_path:
+        return finished_file_path.split('/artifacts/')[0]
+    return finished_file_path[:-len('/finished.json')]
 
 
 def process_single_build(
@@ -273,8 +316,23 @@ def process_single_build(
     job_url = build_prow_job_url(finished_file['name'])
     logger.info(f"Built prow job URL for build {build_id} from path {finished_file['name']}: {job_url}")
 
-    gpu_display = format_gpu_version(gpu_suffix)
-    result = TestResult(ocp_version, gpu_display, status, job_url, str(timestamp))
+    build_base_path = get_build_base_path(finished_file['name'])
+    display_ocp = ocp_version
+    display_gpu = format_gpu_version(gpu_suffix)
+
+    if gpu_suffix != "master":
+        exact_ocp = fetch_exact_ocp_version(build_base_path)
+        if exact_ocp:
+            display_ocp = exact_ocp
+            logger.info(f"Resolved exact OCP version: {exact_ocp}")
+
+        e2e_step_name = "e2e-amd-ci-" + gpu_suffix
+        exact_gpu = fetch_exact_gpu_version(build_base_path, e2e_step_name)
+        if exact_gpu:
+            display_gpu = exact_gpu
+            logger.info(f"Resolved exact GPU operator version: {exact_gpu}")
+
+    result = TestResult(display_ocp, display_gpu, status, job_url, str(timestamp))
 
     return result
 
