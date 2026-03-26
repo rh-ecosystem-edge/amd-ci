@@ -66,6 +66,9 @@ def build_prow_job_url(finished_json_path: str) -> str:
     return f"https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/{directory_path}"
 
 
+SEMVER_REGEX = re.compile(r"^\d+\.\d+\.\d+")
+
+
 @dataclass(frozen=True)
 class TestResult:
     """Represents a single test run result."""
@@ -88,6 +91,13 @@ class TestResult:
         """Get the PR number, job name and build ID for deduplication purposes."""
         repo, pr_number, job_name, build_id = extract_build_components(self.prow_job_url)
         return (pr_number, job_name, build_id)
+
+    def has_exact_versions(self) -> bool:
+        """Check if both versions are exact X.Y.Z semver (not fallbacks like '4.21' or '1.4.x')."""
+        return (
+            bool(SEMVER_REGEX.match(self.ocp_full_version))
+            and bool(SEMVER_REGEX.match(self.gpu_operator_version))
+        )
 
 
 
@@ -382,10 +392,12 @@ def process_tests_for_pr(pr_number: str, results_by_ocp: Dict[str, Dict[str, Any
         if gpu_suffix == "master":
             results_by_ocp[ocp_version]["bundle_tests"].append(result.to_dict())
         else:
-            if result.test_status != STATUS_ABORTED:
+            if result.has_exact_versions() and result.test_status != STATUS_ABORTED:
                 results_by_ocp[ocp_version]["release_tests"].append(result.to_dict())
             else:
-                logger.debug(f"Excluded release test for build {build_id}: status={result.test_status}")
+                logger.debug(
+                    f"Excluded release test for build {build_id}: "
+                    f"status={result.test_status}, exact_versions={result.has_exact_versions()}")
 
         processed_count += 1
 
@@ -459,7 +471,7 @@ def merge_release_tests(
 
     for item in new_tests:
         result = TestResult(**item)
-        if result.test_status != STATUS_ABORTED:
+        if result.has_exact_versions() and result.test_status != STATUS_ABORTED:
             version_key = get_version_key(result)
             results_by_version.setdefault(version_key, []).append(result)
 
