@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -104,6 +105,13 @@ def main(argv: list[str] | None = None) -> int:
             wait_timeout=config.wait_timeout,
             ssh_key=config.remote.ssh_key_path,
         )
+
+        artifact_dir = os.environ.get("ARTIFACT_DIR")
+        if artifact_dir:
+            artifact_path = Path(artifact_dir)
+            artifact_path.mkdir(parents=True, exist_ok=True)
+            (artifact_path / "ocp.version").write_text(ocp_version)
+            print(f"Wrote ocp.version: {ocp_version}")
         
     elif command == "delete":
         params = {"cluster": config.cluster_name}
@@ -154,6 +162,14 @@ def main(argv: list[str] | None = None) -> int:
             ocp_version=config.ocp_version,
         )
         install_operators(oc, config=op_config)
+
+        artifact_dir = os.environ.get("ARTIFACT_DIR")
+        if artifact_dir:
+            artifact_path = Path(artifact_dir)
+            artifact_path.mkdir(parents=True, exist_ok=True)
+            (artifact_path / "operator.version").write_text(gpu_version)
+            print(f"Wrote operator.version: {gpu_version}")
+
         if hasattr(oc, "close"):
             oc.close()
 
