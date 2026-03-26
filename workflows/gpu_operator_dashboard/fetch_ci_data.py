@@ -90,7 +90,6 @@ class TestResult:
         return (pr_number, job_name, build_id)
 
 
-
 def fetch_filtered_files(pr_number: str, glob_pattern: str) -> List[Dict[str, Any]]:
     """Fetch files matching a specific glob pattern for a PR."""
     logger.info(f"Fetching files matching pattern: {glob_pattern}")
@@ -224,15 +223,47 @@ def build_files_lookup(
     return build_files, all_builds
 
 
-def format_gpu_version(gpu_suffix: str) -> str:
-    """Convert GPU version suffix from job name to display format.
+GPU_VERSION_RESOLVED_REGEX = re.compile(r"Resolved AMD GPU Operator \S+ -> (\S+)")
 
-    '1-3-x' -> '1.3.x'
-    'master' -> 'master'
+
+def fetch_exact_ocp_version(build_base_path: str) -> Optional[str]:
+    """Fetch the exact OCP version from the release-images-latest artifact.
+
+    The file is an ImageStream JSON with metadata.name containing the full version (e.g. '4.20.17').
     """
-    if gpu_suffix == "master":
-        return "master"
-    return gpu_suffix.replace("-", ".")
+    release_path = f"{build_base_path}/artifacts/release/artifacts/release-images-latest"
+    try:
+        content = fetch_gcs_file_content(release_path)
+        data = json.loads(content)
+        return data.get("metadata", {}).get("name")
+    except Exception as e:
+        logger.warning(f"Could not fetch exact OCP version from {release_path}: {e}")
+        return None
+
+
+def fetch_exact_gpu_version(build_base_path: str, e2e_step_name: str) -> Optional[str]:
+    """Fetch the exact GPU operator version from the install-operators build log.
+
+    Parses the line: 'Resolved AMD GPU Operator X.Y -> X.Y.Z'
+    """
+    log_path = f"{build_base_path}/artifacts/{e2e_step_name}/amd-gpu-operator-install-operators/build-log.txt"
+    try:
+        content = fetch_gcs_file_content(log_path)
+        match = GPU_VERSION_RESOLVED_REGEX.search(content)
+        if match:
+            return match.group(1)
+        logger.warning(f"Could not parse GPU operator version from {log_path}")
+        return None
+    except Exception as e:
+        logger.warning(f"Could not fetch GPU operator version from {log_path}: {e}")
+        return None
+
+
+def get_build_base_path(finished_file_path: str) -> str:
+    """Get the base build path (up to build_id) from a finished.json path."""
+    if '/artifacts/' in finished_file_path:
+        return finished_file_path.split('/artifacts/')[0]
+    return finished_file_path[:-len('/finished.json')]
 
 
 def process_single_build(
@@ -243,7 +274,7 @@ def process_single_build(
     gpu_suffix: str,
     build_files: Dict[Tuple[str, str, str], Dict[str, Dict[str, Any]]],
     dual_builds_info: Optional[Dict[Tuple[str, str, str], Dict[str, Dict[str, Any]]]] = None
-) -> TestResult:
+) -> Optional[TestResult]:
     """Process a single build and return its test result."""
     key = (pr_number_arg, job_name, build_id)
     build_file_set = build_files[key]
@@ -273,10 +304,21 @@ def process_single_build(
     job_url = build_prow_job_url(finished_file['name'])
     logger.info(f"Built prow job URL for build {build_id} from path {finished_file['name']}: {job_url}")
 
-    gpu_display = format_gpu_version(gpu_suffix)
-    result = TestResult(ocp_version, gpu_display, status, job_url, str(timestamp))
+    build_base_path = get_build_base_path(finished_file['name'])
 
-    return result
+    if gpu_suffix == "master":
+        return TestResult(ocp_version, "master", status, job_url, str(timestamp))
+
+    exact_ocp = fetch_exact_ocp_version(build_base_path)
+    e2e_step_name = "e2e-amd-ci-" + gpu_suffix
+    exact_gpu = fetch_exact_gpu_version(build_base_path, e2e_step_name)
+
+    if not exact_ocp or not exact_gpu:
+        logger.info(f"Skipping build {build_id}: could not resolve exact versions "
+                     f"(ocp={exact_ocp}, gpu={exact_gpu})")
+        return None
+
+    return TestResult(exact_ocp, exact_gpu, status, job_url, str(timestamp))
 
 
 def process_tests_for_pr(pr_number: str, results_by_ocp: Dict[str, Dict[str, Any]]) -> None:
@@ -314,13 +356,14 @@ def process_tests_for_pr(pr_number: str, results_by_ocp: Dict[str, Dict[str, Any
         result = process_single_build(
             pr_num, job_name, build_id, ocp_version, gpu_suffix, build_files, dual_builds_info)
 
+        if result is None:
+            continue
+
         results_by_ocp.setdefault(ocp_version, {"bundle_tests": [], "release_tests": [], "job_history_links": set()})
 
         job_history_url = f"https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/{job_name}"
         results_by_ocp[ocp_version]["job_history_links"].add(job_history_url)
 
-        # Jobs ending with a version suffix (e.g. -1-3-x, -1-4-x) are release tests;
-        # jobs without a version suffix (bare e2e-amd-ci) are bundle/master tests
         if gpu_suffix == "master":
             results_by_ocp[ocp_version]["bundle_tests"].append(result.to_dict())
         else:
