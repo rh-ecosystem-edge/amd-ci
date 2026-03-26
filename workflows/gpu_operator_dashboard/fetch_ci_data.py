@@ -66,9 +66,6 @@ def build_prow_job_url(finished_json_path: str) -> str:
     return f"https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/{directory_path}"
 
 
-SEMVER_REGEX = re.compile(r"^\d+\.\d+\.\d+")
-
-
 @dataclass(frozen=True)
 class TestResult:
     """Represents a single test run result."""
@@ -91,14 +88,6 @@ class TestResult:
         """Get the PR number, job name and build ID for deduplication purposes."""
         repo, pr_number, job_name, build_id = extract_build_components(self.prow_job_url)
         return (pr_number, job_name, build_id)
-
-    def has_exact_versions(self) -> bool:
-        """Check if both versions are exact X.Y.Z semver (not fallbacks like '4.21' or '1.4.x')."""
-        return (
-            bool(SEMVER_REGEX.match(self.ocp_full_version))
-            and bool(SEMVER_REGEX.match(self.gpu_operator_version))
-        )
-
 
 
 def fetch_filtered_files(pr_number: str, glob_pattern: str) -> List[Dict[str, Any]]:
@@ -237,17 +226,6 @@ def build_files_lookup(
 GPU_VERSION_RESOLVED_REGEX = re.compile(r"Resolved AMD GPU Operator \S+ -> (\S+)")
 
 
-def format_gpu_version(gpu_suffix: str) -> str:
-    """Convert GPU version suffix from job name to display format.
-
-    '1-3-x' -> '1.3.x'
-    'master' -> 'master'
-    """
-    if gpu_suffix == "master":
-        return "master"
-    return gpu_suffix.replace("-", ".")
-
-
 def fetch_exact_ocp_version(build_base_path: str) -> Optional[str]:
     """Fetch the exact OCP version from the release-images-latest artifact.
 
@@ -296,7 +274,7 @@ def process_single_build(
     gpu_suffix: str,
     build_files: Dict[Tuple[str, str, str], Dict[str, Dict[str, Any]]],
     dual_builds_info: Optional[Dict[Tuple[str, str, str], Dict[str, Dict[str, Any]]]] = None
-) -> TestResult:
+) -> Optional[TestResult]:
     """Process a single build and return its test result."""
     key = (pr_number_arg, job_name, build_id)
     build_file_set = build_files[key]
@@ -327,24 +305,20 @@ def process_single_build(
     logger.info(f"Built prow job URL for build {build_id} from path {finished_file['name']}: {job_url}")
 
     build_base_path = get_build_base_path(finished_file['name'])
-    display_ocp = ocp_version
-    display_gpu = format_gpu_version(gpu_suffix)
 
-    if gpu_suffix != "master":
-        exact_ocp = fetch_exact_ocp_version(build_base_path)
-        if exact_ocp:
-            display_ocp = exact_ocp
-            logger.info(f"Resolved exact OCP version: {exact_ocp}")
+    if gpu_suffix == "master":
+        return TestResult(ocp_version, "master", status, job_url, str(timestamp))
 
-        e2e_step_name = "e2e-amd-ci-" + gpu_suffix
-        exact_gpu = fetch_exact_gpu_version(build_base_path, e2e_step_name)
-        if exact_gpu:
-            display_gpu = exact_gpu
-            logger.info(f"Resolved exact GPU operator version: {exact_gpu}")
+    exact_ocp = fetch_exact_ocp_version(build_base_path)
+    e2e_step_name = "e2e-amd-ci-" + gpu_suffix
+    exact_gpu = fetch_exact_gpu_version(build_base_path, e2e_step_name)
 
-    result = TestResult(display_ocp, display_gpu, status, job_url, str(timestamp))
+    if not exact_ocp or not exact_gpu:
+        logger.info(f"Skipping build {build_id}: could not resolve exact versions "
+                     f"(ocp={exact_ocp}, gpu={exact_gpu})")
+        return None
 
-    return result
+    return TestResult(exact_ocp, exact_gpu, status, job_url, str(timestamp))
 
 
 def process_tests_for_pr(pr_number: str, results_by_ocp: Dict[str, Dict[str, Any]]) -> None:
@@ -382,22 +356,21 @@ def process_tests_for_pr(pr_number: str, results_by_ocp: Dict[str, Dict[str, Any
         result = process_single_build(
             pr_num, job_name, build_id, ocp_version, gpu_suffix, build_files, dual_builds_info)
 
+        if result is None:
+            continue
+
         results_by_ocp.setdefault(ocp_version, {"bundle_tests": [], "release_tests": [], "job_history_links": set()})
 
         job_history_url = f"https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/{job_name}"
         results_by_ocp[ocp_version]["job_history_links"].add(job_history_url)
 
-        # Jobs ending with a version suffix (e.g. -1-3-x, -1-4-x) are release tests;
-        # jobs without a version suffix (bare e2e-amd-ci) are bundle/master tests
         if gpu_suffix == "master":
             results_by_ocp[ocp_version]["bundle_tests"].append(result.to_dict())
         else:
-            if result.has_exact_versions() and result.test_status != STATUS_ABORTED:
+            if result.test_status != STATUS_ABORTED:
                 results_by_ocp[ocp_version]["release_tests"].append(result.to_dict())
             else:
-                logger.debug(
-                    f"Excluded release test for build {build_id}: "
-                    f"status={result.test_status}, exact_versions={result.has_exact_versions()}")
+                logger.debug(f"Excluded release test for build {build_id}: status={result.test_status}")
 
         processed_count += 1
 
@@ -471,7 +444,7 @@ def merge_release_tests(
 
     for item in new_tests:
         result = TestResult(**item)
-        if result.has_exact_versions() and result.test_status != STATUS_ABORTED:
+        if result.test_status != STATUS_ABORTED:
             version_key = get_version_key(result)
             results_by_version.setdefault(version_key, []).append(result)
 
