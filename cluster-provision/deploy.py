@@ -229,6 +229,7 @@ def deploy_remote(
     """Deploy OpenShift cluster on a remote libvirt host."""
     from remote import (
         setup_remote_libvirt,
+        ensure_host_pci_passthrough,
         configure_kcli_remote_client,
         setup_remote_cluster_access,
         wait_for_cluster_ready,
@@ -260,6 +261,11 @@ def deploy_remote(
     # Step 1: Setup remote host (idempotent)
     print("Step 1: Setting up remote host...")
     setup_remote_libvirt(remote_host, remote_user)
+
+    # Step 1b: Ensure PCI passthrough is enabled on the host (may reboot)
+    if pci_devices:
+        print("\nStep 1b: Ensuring PCI passthrough is enabled on host...")
+        ensure_host_pci_passthrough(remote_host, remote_user, pci_devices)
 
     # Step 2: Configure kcli client
     print("\nStep 2: Configuring kcli client...")
