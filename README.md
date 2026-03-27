@@ -2,6 +2,8 @@
 
 Continuous Integration for AMD GPU Operator on OpenShift.
 
+[CI Dashboard](https://rh-ecosystem-edge.github.io/amd-ci/)
+
 ## OpenShift Cluster Provisioner
 
 Deploy OpenShift clusters using kcli on local or remote libvirt hosts.
