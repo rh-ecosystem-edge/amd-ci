@@ -226,18 +226,13 @@ def build_files_lookup(
 GPU_VERSION_RESOLVED_REGEX = re.compile(r"Resolved AMD GPU Operator \S+ -> (\S+)")
 
 
-def fetch_exact_ocp_version(build_base_path: str) -> Optional[str]:
-    """Fetch the exact OCP version from the release-images-latest artifact.
-
-    The file is an ImageStream JSON with metadata.name containing the full version (e.g. '4.20.17').
-    """
-    release_path = f"{build_base_path}/artifacts/release/artifacts/release-images-latest"
+def fetch_exact_ocp_version(build_base_path: str, e2e_step_name: str) -> Optional[str]:
+    """Fetch the exact OCP version from the provision step's ocp.version artifact."""
+    version_path = f"{build_base_path}/artifacts/{e2e_step_name}/amd-gpu-operator-provision/artifacts/ocp.version"
     try:
-        content = fetch_gcs_file_content(release_path)
-        data = json.loads(content)
-        return data.get("metadata", {}).get("name")
+        return fetch_gcs_file_content(version_path).strip() or None
     except Exception as e:
-        logger.warning(f"Could not fetch exact OCP version from {release_path}: {e}")
+        logger.warning(f"Could not fetch exact OCP version from {version_path}: {e}")
         return None
 
 
@@ -309,8 +304,8 @@ def process_single_build(
     if gpu_suffix == "master":
         return TestResult(ocp_version, "master", status, job_url, str(timestamp))
 
-    exact_ocp = fetch_exact_ocp_version(build_base_path)
     e2e_step_name = "e2e-amd-ci-" + gpu_suffix
+    exact_ocp = fetch_exact_ocp_version(build_base_path, e2e_step_name)
     exact_gpu = fetch_exact_gpu_version(build_base_path, e2e_step_name)
 
     if not exact_ocp or not exact_gpu:
