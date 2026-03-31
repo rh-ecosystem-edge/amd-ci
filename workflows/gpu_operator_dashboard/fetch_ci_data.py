@@ -301,9 +301,6 @@ def process_single_build(
 
     build_base_path = get_build_base_path(finished_file['name'])
 
-    if gpu_suffix == "master":
-        return TestResult(ocp_version, "master", status, job_url, str(timestamp))
-
     e2e_step_name = "e2e-amd-ci-" + gpu_suffix
     exact_ocp = fetch_exact_ocp_version(build_base_path, e2e_step_name)
     exact_gpu = fetch_exact_gpu_version(build_base_path, e2e_step_name)
@@ -343,7 +340,10 @@ def process_tests_for_pr(pr_number: str, results_by_ocp: Dict[str, Dict[str, Any
             logger.warning(f"Could not parse versions from components: {pr_num}, {job_name}, {build_id}")
             continue
         ocp_version = match.group("ocp_version")
-        gpu_suffix = match.group("gpu_version") or "master"
+        gpu_suffix = match.group("gpu_version")
+        if not gpu_suffix:
+            logger.info(f"Skipping build {build_id}: no GPU version suffix (bundle/master job)")
+            continue
 
         logger.info(
             f"Processing build {build_id} for {ocp_version} + {gpu_suffix}")
@@ -354,18 +354,15 @@ def process_tests_for_pr(pr_number: str, results_by_ocp: Dict[str, Dict[str, Any
         if result is None:
             continue
 
-        results_by_ocp.setdefault(ocp_version, {"bundle_tests": [], "release_tests": [], "job_history_links": set()})
+        results_by_ocp.setdefault(ocp_version, {"release_tests": [], "job_history_links": set()})
 
         job_history_url = f"https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/{job_name}"
         results_by_ocp[ocp_version]["job_history_links"].add(job_history_url)
 
-        if gpu_suffix == "master":
-            results_by_ocp[ocp_version]["bundle_tests"].append(result.to_dict())
+        if result.test_status != STATUS_ABORTED:
+            results_by_ocp[ocp_version]["release_tests"].append(result.to_dict())
         else:
-            if result.test_status != STATUS_ABORTED:
-                results_by_ocp[ocp_version]["release_tests"].append(result.to_dict())
-            else:
-                logger.debug(f"Excluded release test for build {build_id}: status={result.test_status}")
+            logger.debug(f"Excluded release test for build {build_id}: status={result.test_status}")
 
         processed_count += 1
 
@@ -387,33 +384,6 @@ def process_closed_prs(results_by_ocp: Dict[str, Dict[str, List[Dict[str, Any]]]
         pr_number = str(pr["number"])
         logger.info(f"Processing PR #{pr_number}")
         process_tests_for_pr(pr_number, results_by_ocp)
-
-
-def merge_bundle_tests(
-    new_tests: List[Dict[str, Any]],
-    existing_tests: List[Dict[str, Any]],
-    limit: Optional[int] = None
-) -> List[Dict[str, Any]]:
-    """Merge bundle tests with existing bundle tests and apply limit while keeping the most recent results."""
-    all_tests_by_build = {}
-
-    for item in existing_tests:
-        result = TestResult(**item)
-        build_key = result.build_key()
-        all_tests_by_build[build_key] = item
-
-    for item in new_tests:
-        result = TestResult(**item)
-        build_key = result.build_key()
-        all_tests_by_build[build_key] = item
-
-    all_tests = list(all_tests_by_build.values())
-    all_tests.sort(key=lambda x: int(x.get('job_timestamp', '0')), reverse=True)
-
-    if limit is not None:
-        return all_tests[:limit]
-
-    return all_tests
 
 
 def get_version_key(result: TestResult) -> Tuple[str, str]:
@@ -467,17 +437,11 @@ def merge_release_tests(
 def merge_ocp_version_results(
     new_version_data: Dict[str, List[Dict[str, Any]]],
     existing_version_data: Dict[str, Any],
-    bundle_result_limit: Optional[int] = None
 ) -> Dict[str, Any]:
     """Merge results for a single OCP version."""
-    merged_version_data = {"notes": [], "bundle_tests": [], "release_tests": [], "job_history_links": []}
+    merged_version_data = {"notes": [], "release_tests": [], "job_history_links": []}
     merged_version_data.update(existing_version_data)
-
-    new_bundle_tests = new_version_data.get("bundle_tests", [])
-    existing_bundle_tests = merged_version_data.get("bundle_tests", [])
-    merged_version_data["bundle_tests"] = merge_bundle_tests(
-        new_bundle_tests, existing_bundle_tests, bundle_result_limit
-    )
+    merged_version_data.pop("bundle_tests", None)
 
     new_release_tests = new_version_data.get("release_tests", [])
     existing_release_tests = merged_version_data.get("release_tests", [])
@@ -499,15 +463,14 @@ def merge_and_save_results(
     new_results: Dict[str, Dict[str, List[Dict[str, Any]]]],
     output_file: str,
     existing_results: Dict[str, Dict[str, Any]] = None,
-    bundle_result_limit: Optional[int] = None
 ) -> None:
-    """Merge and save test results with separated bundle and release test keys."""
+    """Merge and save test results."""
     merged_results = existing_results.copy() if existing_results else {}
 
     for ocp_version, version_data in new_results.items():
         existing_version_data = merged_results.get(ocp_version, {})
         merged_version_data = merge_ocp_version_results(
-            version_data, existing_version_data, bundle_result_limit
+            version_data, existing_version_data,
         )
         merged_results[ocp_version] = merged_version_data
 
@@ -521,15 +484,6 @@ def merge_and_save_results(
 # Main Workflow: Update JSON
 # =============================================================================
 
-def int_or_none(value: Optional[str]) -> Optional[int]:
-    """Convert string to int or None for unlimited."""
-    if value is None:
-        return None
-    if value.lower() in ('none', 'unlimited'):
-        return None
-    return int(value)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Test Matrix Utility")
     parser.add_argument("--pr_number", default="all",
@@ -538,8 +492,6 @@ def main() -> None:
                         help="Path to the baseline data file")
     parser.add_argument("--merged_data_filepath", required=True,
                         help="Path to the updated (merged) data file")
-    parser.add_argument("--bundle_result_limit", type=int_or_none, default=None,
-                        help="Number of latest bundle results to keep per version. Omit or use 'unlimited' for no limit.")
     args = parser.parse_args()
 
     with open(args.baseline_data_filepath, "r") as f:
@@ -552,7 +504,7 @@ def main() -> None:
     else:
         process_tests_for_pr(args.pr_number, local_results)
     merge_and_save_results(
-        local_results, args.merged_data_filepath, existing_results=existing_results, bundle_result_limit=args.bundle_result_limit)
+        local_results, args.merged_data_filepath, existing_results=existing_results)
 
 
 if __name__ == "__main__":
