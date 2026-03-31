@@ -6,3 +6,4 @@ __pycache__/
 venv/
 *.log
 openshift-install
+must-gather-output/
