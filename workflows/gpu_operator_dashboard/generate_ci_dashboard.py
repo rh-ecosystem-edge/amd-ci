@@ -39,7 +39,6 @@ def generate_test_matrix(ocp_data: Dict[str, Dict[str, Any]]) -> str:
 
     for ocp_key in sorted_ocp_keys:
         notes = ocp_data[ocp_key].get("notes", [])
-        bundle_results = ocp_data[ocp_key].get("bundle_tests", [])
         release_results = ocp_data[ocp_key].get("release_tests", [])
 
         regular_results = []
@@ -48,11 +47,9 @@ def generate_test_matrix(ocp_data: Dict[str, Dict[str, Any]]) -> str:
                 regular_results.append(r)
         notes_html = build_notes(notes)
         table_rows_html = build_catalog_table_rows(regular_results)
-        bundle_info_html = build_bundle_info(bundle_results)
         table_block = main_table_template
         table_block = table_block.replace("{ocp_key}", ocp_key)
         table_block = table_block.replace("{table_rows}", table_rows_html)
-        table_block = table_block.replace("{bundle_info}", bundle_info_html)
         table_block = table_block.replace("{notes}", notes_html)
         html_content += table_block
 
@@ -149,49 +146,6 @@ def build_toc(ocp_keys: List[str]) -> str:
     {toc_links}
 </div>
     """
-
-
-def build_bundle_info(bundle_results: List[Dict[str, Any]]) -> str:
-    """
-    Build a small HTML snippet that displays info about GPU bundle statuses
-    (shown in a 'history-bar' with colored squares).
-    """
-    if not bundle_results:
-        return ""
-    sorted_bundles = sorted(
-        bundle_results, key=lambda r: int(r["job_timestamp"]), reverse=True)
-    leftmost_bundle = sorted_bundles[0]
-    last_bundle_date = datetime.fromtimestamp(int(
-        leftmost_bundle["job_timestamp"]), timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    bundle_html = f"""
-  <div class="section-label">
-    <strong>From main branch (OLM bundle)</strong>
-  </div>
-  <div class="history-bar-inner history-bar-outer">
-    <div style="margin-top: 5px;">
-      <strong>Last Bundle Job Date:</strong> {last_bundle_date}
-    </div>
-    """
-    for bundle in sorted_bundles:
-        status = bundle.get("test_status", "Unknown").upper()
-        if status == "SUCCESS":
-            status_class = "history-success"
-        elif status == "FAILURE":
-            status_class = "history-failure"
-        else:
-            status_class = "history-aborted"
-        bundle_timestamp = datetime.fromtimestamp(
-            int(bundle["job_timestamp"]), timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        bundle_html += f"""
-    <div class='history-square {status_class}'
-         onclick='window.open("{bundle["prow_job_url"]}", "_blank")'>
-         <span class="history-square-tooltip">
-          Status: {status} | Timestamp: {bundle_timestamp}
-         </span>
-    </div>
-        """
-    bundle_html += "</div>"
-    return bundle_html
 
 
 def main():
