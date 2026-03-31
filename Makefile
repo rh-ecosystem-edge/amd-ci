@@ -59,6 +59,19 @@ ifndef CONFIG_FILE_PATH
 endif
 	python3 cluster-provision/main.py --config $(CONFIG_FILE_PATH) cleanup
 
+# ============================================
+# Must-Gather (Diagnostics)
+# ============================================
+
+# Collect diagnostic data for NFD, AMD GPU Operator, and KMM
+# Auto-detects installed operators and skips any that are absent.
+# Usage: make must-gather
+#        make must-gather ARTIFACT_DIR=/tmp/my-artifacts
+ARTIFACT_DIR ?= $(CURDIR)/must-gather-output
+
+must-gather:
+	ARTIFACT_DIR=$(ARTIFACT_DIR) ./scripts/must-gather.sh
+
 # Help target
 help:
 	@echo "OpenShift Cluster Provisioner"
@@ -78,6 +91,8 @@ help:
 	@echo "  make test-gpu                                  - Run AMD GPU tests (local kubeconfig)"
 	@echo "  make cluster-cleanup CONFIG_FILE_PATH=<path>   - Clean up AMD GPU operator stack"
 	@echo "  make cluster-delete CONFIG_FILE_PATH=<path>    - Delete cluster"
+	@echo "  make must-gather                               - Collect diagnostic data (NFD/GPU/KMM)"
+	@echo "  make must-gather ARTIFACT_DIR=<path>           - Collect diagnostics to custom dir"
 	@echo "  make help                                      - Show this help"
 	@echo ""
 	@echo "Config file options (see cluster-config.yaml.example):"
@@ -86,4 +101,4 @@ help:
 	@echo "  remote.ssh_key_path, pci_devices, wait_timeout,"
 	@echo "  operators.install, operators.machine_config_role, operators.driver_version"
 
-.PHONY: test test-gpu cluster-deploy cluster-delete cluster-operators cluster-cleanup help
+.PHONY: test test-gpu cluster-deploy cluster-delete cluster-operators cluster-cleanup must-gather help
