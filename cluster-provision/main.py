@@ -5,11 +5,12 @@ Manage OpenShift cluster lifecycle with kcli.
 Each command is responsible for a single task and does NOT trigger the next one.
 
 Usage:
-  python main.py --config cluster-config.yaml deploy      # deploy cluster (no operators, no tests)
-  python main.py --config cluster-config.yaml operators    # install AMD GPU operators (no tests)
-  python main.py --config cluster-config.yaml test-gpu     # run AMD GPU tests only
-  python main.py --config cluster-config.yaml cleanup      # remove AMD GPU operator stack
-  python main.py --config cluster-config.yaml delete       # delete the cluster
+  python main.py --config cluster-config.yaml deploy       # deploy cluster (no operators, no tests)
+  python main.py --config cluster-config.yaml operators     # install AMD GPU operators (no tests)
+  python main.py --config cluster-config.yaml test-gpu      # run AMD GPU tests only
+  python main.py --config cluster-config.yaml cleanup       # remove AMD GPU operator stack
+  python main.py --config cluster-config.yaml delete        # delete the cluster
+  python main.py --config cluster-config.yaml must-gather   # collect diagnostic data
 """
 
 from __future__ import annotations
@@ -66,6 +67,10 @@ Examples:
         "cleanup",
         help="Clean up AMD GPU Operator stack (reverse of operators install)",
     )
+    subparsers.add_parser(
+        "must-gather",
+        help="Collect diagnostic data (NFD, AMD GPU Operator, KMM)",
+    )
 
     return parser.parse_args(argv)
 
@@ -74,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     command = args.command
     if not command:
-        print("Error: no command specified. Use one of: deploy, delete, operators, test-gpu, cleanup", file=sys.stderr)
+        print("Error: no command specified. Use one of: deploy, delete, operators, test-gpu, cleanup, must-gather", file=sys.stderr)
         return 1
 
     # Load configuration from file
@@ -226,6 +231,35 @@ def main(argv: list[str] | None = None) -> int:
         cleanup_operators(oc)
         if hasattr(oc, "close"):
             oc.close()
+
+    elif command == "must-gather":
+        from must_gather import run_must_gather, run_must_gather_remote
+
+        artifact_dir = config.must_gather.artifact_dir
+
+        if config.remote.host and config.remote.ssh_key_path:
+            from shared.ssh import set_ssh_key_path
+            set_ssh_key_path(config.remote.ssh_key_path)
+
+        if config.remote.host:
+            return run_must_gather_remote(
+                host=config.remote.host,
+                user=config.remote.user,
+                artifact_dir=artifact_dir,
+            )
+        else:
+            kubeconfig = (
+                Path.home()
+                / ".kcli"
+                / "clusters"
+                / config.cluster_name
+                / "auth"
+                / "kubeconfig"
+            )
+            if not kubeconfig.exists():
+                print(f"Error: kubeconfig not found at {kubeconfig}", file=sys.stderr)
+                return 1
+            return run_must_gather(kubeconfig=str(kubeconfig), artifact_dir=artifact_dir)
 
     else:
         print(f"Unknown command: {command}", file=sys.stderr)

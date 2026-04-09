@@ -2,7 +2,7 @@
 OpenShift Cluster Configuration.
 
 Configuration dataclasses and YAML config file loading.
-All values must be provided in the YAML config file — no implicit defaults.
+All values must be provided in the YAML config file unless noted as optional.
 """
 
 from __future__ import annotations
@@ -46,10 +46,18 @@ class OperatorsConfig:
 
 
 @dataclass
+class MustGatherConfig:
+    """Must-gather diagnostics configuration (optional in YAML, has defaults)."""
+
+    artifact_dir: str
+
+
+@dataclass
 class ClusterConfig:
     """Complete cluster configuration.
 
-    All fields are required and must be set explicitly in the YAML config file.
+    All fields are required and must be set explicitly in the YAML config file,
+    except for must_gather which is optional and has sensible defaults.
     """
 
     ocp_version: str
@@ -68,6 +76,7 @@ class ClusterConfig:
     wait_timeout: int
     version_channel: str
     operators: OperatorsConfig
+    must_gather: MustGatherConfig
 
 def _expand_path(path: str | None) -> str | None:
     """Expand ~ and environment variables in a path."""
@@ -210,6 +219,11 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
             enable_metrics=operators_data["enable_metrics"],
         )
 
+        must_gather_data = raw_config.get("must_gather", {})
+        must_gather = MustGatherConfig(
+            artifact_dir=_expand_path(must_gather_data.get("artifact_dir", "./must-gather-output")),
+        )
+
         return ClusterConfig(
             ocp_version=raw_config["ocp_version"],
             pull_secret_path=_expand_path(raw_config["pull_secret_path"]),
@@ -227,6 +241,7 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
             wait_timeout=raw_config["wait_timeout"],
             version_channel=raw_config["version_channel"],
             operators=operators,
+            must_gather=must_gather,
         )
     except KeyError as exc:
         raise KeyError(

@@ -3,8 +3,8 @@
 # must-gather.sh — Collect diagnostic data for NFD, AMD GPU Operator, and KMM.
 #
 # Usage:
-#   ARTIFACT_DIR=/tmp/artifacts ./scripts/must-gather.sh
-#   make must-gather ARTIFACT_DIR=/tmp/artifacts
+#   make must-gather CONFIG_FILE_PATH=cluster-config.yaml
+#   KUBECONFIG=/path/to/kubeconfig ARTIFACT_DIR=/tmp/artifacts ./scripts/must-gather.sh
 #
 # Auto-detects which operators are installed and skips any that are absent.
 # Individual operator failures do not abort the overall collection.
