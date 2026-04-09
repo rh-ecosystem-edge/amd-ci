@@ -30,6 +30,10 @@ pci_devices: []
 wait_timeout: 3600
 version_channel: stable
 
+# Must-gather diagnostics
+must_gather:
+  artifact_dir: ./must-gather-output   # local directory to store collected diagnostics
+
 # Post-install: install AMD GPU Operator and dependencies (NFD, KMM) per OLM doc
 # https://instinct.docs.amd.com/projects/gpu-operator/en/release-v1.4.1/installation/openshift-olm.html
 operators:
