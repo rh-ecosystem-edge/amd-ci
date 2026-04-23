@@ -38,6 +38,11 @@ def fetch_ocp_versions(settings: Settings) -> dict[str, str]:
             continue
 
         sem_ver = semver.VersionInfo.parse(ver)
+
+        if sem_ver.prerelease:
+            logger.debug(f'Skipping pre-release version {ver}')
+            continue
+
         minor = f'{sem_ver.major}.{sem_ver.minor}'
         if ignored_regex.fullmatch(minor):
             logger.debug(f'Version {ver} is ignored because all {minor} are ignored')
