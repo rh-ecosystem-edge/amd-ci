@@ -146,6 +146,42 @@ class TestFetchOCPVersions(unittest.TestCase):
             fetch_ocp_versions(mock_settings)
 
     @patch('workflows.gpu_operator_versions.openshift.requests.get')
+    def test_fetch_ocp_versions_skips_prerelease(self, mock_get):
+        """Verify that pre-release versions (e.g. RC) are excluded."""
+        mock_settings = self._create_mock_settings()
+        mock_get.return_value = self._create_mock_response({
+            '4-stable': [
+                '4.18.1', '4.18.2',
+                '4.19.0-rc.0', '4.19.0-rc.1',
+                '4.19.0', '4.19.1',
+                '4.20.0-ec.0',
+            ]
+        })
+
+        result = fetch_ocp_versions(mock_settings)
+
+        expected = {
+            '4.18': '4.18.2',
+            '4.19': '4.19.1',
+        }
+        self.assertEqual(result, expected)
+
+    @patch('workflows.gpu_operator_versions.openshift.requests.get')
+    def test_fetch_ocp_versions_skips_minor_with_only_prereleases(self, mock_get):
+        """Verify that a minor with only pre-release versions is not included."""
+        mock_settings = self._create_mock_settings()
+        mock_get.return_value = self._create_mock_response({
+            '4-stable': ['4.18.1', '4.22.0-rc.0']
+        })
+
+        result = fetch_ocp_versions(mock_settings)
+
+        expected = {
+            '4.18': '4.18.1',
+        }
+        self.assertEqual(result, expected)
+
+    @patch('workflows.gpu_operator_versions.openshift.requests.get')
     def test_fetch_ocp_versions_invalid_semver(self, mock_get):
         """Verify that invalid semver format raises ValueError."""
         mock_settings = self._create_mock_settings()
