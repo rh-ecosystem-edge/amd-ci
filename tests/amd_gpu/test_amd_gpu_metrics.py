@@ -38,12 +38,15 @@ class TestMetricsExporter:
     def _find_metrics_service(
         self, k8s_core_api: client.CoreV1Api
     ) -> client.V1Service | None:
-        """Return the first Service with 'metrics' in its name, or None."""
+        """Return the metrics-exporter Service, or None."""
         services = k8s_core_api.list_namespaced_service(NAMESPACE_AMD_GPU)
-        return next(
-            (s for s in services.items if "metrics" in (s.metadata.name or "")),
-            None,
-        )
+        expected_prefix = METRICS_EXPORTER_PREFIX.removesuffix("-")
+        matches = [
+            s
+            for s in services.items
+            if (s.metadata.name or "").startswith(expected_prefix)
+        ]
+        return matches[0] if matches else None
 
     def test_metrics_exporter_pods_running(
         self,
@@ -65,6 +68,14 @@ class TestMetricsExporter:
         assert len(exporter_pods) == len(amd_gpu_nodes), (
             f"Expected {len(amd_gpu_nodes)} metrics exporter pod(s) "
             f"(one per AMD GPU node), found {len(exporter_pods)}"
+        )
+        gpu_node_names = {n.metadata.name for n in amd_gpu_nodes}
+        exporter_node_names = {
+            p.spec.node_name for p in exporter_pods if p.spec and p.spec.node_name
+        }
+        assert exporter_node_names == gpu_node_names, (
+            "Metrics exporter pod placement mismatch. "
+            f"Expected nodes={sorted(gpu_node_names)}, got={sorted(exporter_node_names)}"
         )
 
         for pod in exporter_pods:
@@ -149,7 +160,12 @@ class TestMetricsExporter:
                 f"HTTP {exc.status} — skipping metric content checks"
             )
 
-        missing = [m for m in EXPECTED_METRICS if m not in body]
+        metric_names = {
+            line.split("{", 1)[0].split()[0]
+            for line in body.splitlines()
+            if line and not line.startswith("#")
+        }
+        missing = [m for m in EXPECTED_METRICS if m not in metric_names]
         assert not missing, (
             f"The following expected metrics were not found in /metrics output: {missing}"
         )
