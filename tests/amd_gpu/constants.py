@@ -76,6 +76,21 @@ DEVICE_IDS: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
+# Metrics exporter
+# ---------------------------------------------------------------------------
+METRICS_EXPORTER_PREFIX = f"{DEVICECONFIG_NAME}-metrics-exporter-"
+
+# Core Prometheus metric names expected in the /metrics response.
+# These correspond to the amd_ prefixed fields from the device-metrics-exporter.
+EXPECTED_METRICS = [
+    "gpu_edge_temperature",
+    "gpu_average_package_power",
+    "gpu_used_vram",
+    "gpu_total_vram",
+    "gpu_gfx_activity",
+]
+
+# ---------------------------------------------------------------------------
 # Timeouts and polling intervals (seconds)
 # ---------------------------------------------------------------------------
 POD_COMPLETION_TIMEOUT = 300
