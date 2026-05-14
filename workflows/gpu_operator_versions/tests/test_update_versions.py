@@ -20,9 +20,6 @@ class TestCalculateDiffs(unittest.TestCase):
                 '1.4': '1.4.1',
                 '1.5': '1.5.2'
             },
-            'gpu-operator-pending': {
-                '1.6': '1.6.0'
-            },
             'ocp': {
                 '4.18': '4.18.1',
                 '4.19': '4.19.1'

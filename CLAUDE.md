@@ -108,5 +108,5 @@ Runs the pytest suite in `tests/amd_gpu/test_amd_gpu_basic.py`. Tests verify the
 - `OcRunner.oc()` returns `subprocess.CompletedProcess` — callers check `returncode` rather than catching exceptions.
 - `OcRunner.apply_yaml()` accepts YAML strings, not file paths. For remote, it SCPs a temp file.
 - All cluster operations support local and remote modes, controlled by the `remote` section in config. Remote mode uses SSH multiplexing (`shared/ssh.py`).
-- `versions.json` has two GPU operator sections: `gpu-operator` (actively tested) and `gpu-operator-pending` (older, no longer in the matrix).
+- `versions.json` tracks detected versions under two keys: `gpu-operator` (minor → latest patch) and `ocp` (minor → latest patch).
 - Prow job definitions live in the openshift/release repo: `ci-operator/config/rh-ecosystem-edge/amd-ci/`.
