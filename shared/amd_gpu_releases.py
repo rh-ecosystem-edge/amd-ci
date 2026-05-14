@@ -42,25 +42,21 @@ def fetch_release_tags(timeout: int = 30) -> list[str]:
     return [r["tag_name"] for r in resp.json() if not r.get("draft", False)]
 
 
-def parse_versions_from_tags(tags: list[str]) -> tuple[dict, dict]:
+def parse_versions_from_tags(tags: list[str]) -> dict[str, str]:
     """Parse version strings from GitHub release tags.
     Supports tag formats:
     - gpu-operator-charts-v1.4.0
     - v1.0.0, 1.0.0
 
-    Versions with only patch 0 are placed in pending_versions until a
-    patch >= 1 version is released.
+    For each minor version, keeps only the highest patch version.
 
     Args:
         tags: List of release tag names from GitHub.
 
     Returns:
-        (certified_versions, pending_versions)
-        - certified_versions: minor -> highest full version (patch >= 1)
-        - pending_versions:   minor -> patch-0 version
+        dict mapping minor version (e.g. "1.4") to highest full version (e.g. "1.4.1")
     """
     all_versions: dict[str, str] = {}
-    has_certified_patch: dict[str, bool] = {}
 
     for tag in tags:
         match = TAG_FULL.match(tag) or TAG_SIMPLE.match(tag)
@@ -77,16 +73,4 @@ def parse_versions_from_tags(tags: list[str]) -> tuple[dict, dict]:
         existing = all_versions.get(minor_key, VERSION_NOT_FOUND)
         all_versions[minor_key] = max_version(existing, full_version)
 
-        if patch != "0":
-            has_certified_patch[minor_key] = True
-
-    certified: dict[str, str] = {}
-    pending: dict[str, str] = {}
-
-    for minor_key, full_version in all_versions.items():
-        if has_certified_patch.get(minor_key, False):
-            certified[minor_key] = full_version
-        else:
-            pending[minor_key] = full_version
-
-    return certified, pending
+    return all_versions

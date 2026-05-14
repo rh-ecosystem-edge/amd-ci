@@ -117,13 +117,12 @@ def main():
     Main function to detect version changes and generate test commands.
     
     Process:
-    1. Fetch current AMD GPU operator versions (certified and pending)
-    2. Fetch current OpenShift versions
-    3. Load previously stored versions
-    4. Calculate differences
-    5. Generate test matrix
-    6. Save test commands to file
-    7. Update version file
+    1. Fetch current AMD GPU operator and OpenShift versions
+    2. Load previously stored versions
+    3. Calculate differences
+    4. Generate test matrix
+    5. Save test commands to file
+    6. Update version file
     """
     logger.info('Starting AMD GPU Operator CI version detection')
     
@@ -131,18 +130,17 @@ def main():
     
     # Fetch current versions
     logger.info('Fetching AMD GPU operator versions...')
-    gpu_versions, gpu_pending_versions = get_operator_versions(settings)
+    gpu_versions = get_operator_versions(settings)
     
     logger.info('Fetching OpenShift versions...')
     ocp_versions = fetch_ocp_versions(settings)
 
     new_versions = {
         "gpu-operator": gpu_versions,
-        "gpu-operator-pending": gpu_pending_versions,
         "ocp": ocp_versions
     }
     
-    logger.info(f'Fetched versions: OCP={len(ocp_versions)}, GPU={len(gpu_versions)} certified, {len(gpu_pending_versions)} pending')
+    logger.info(f'Fetched versions: OCP={len(ocp_versions)}, GPU={len(gpu_versions)}')
 
     # Load old versions and update file
     with open(settings.version_file_path, "r+") as json_f:

@@ -19,18 +19,18 @@ def resolve_latest_patch(version: str, timeout: int = 30) -> str:
         Full version string (e.g. "1.4.1").
 
     Raises:
-        ValueError: If no certified release is found for the given version.
+        ValueError: If no release is found for the given version.
     """
     tags = fetch_release_tags(timeout=timeout)
-    certified, pending = parse_versions_from_tags(tags)
+    versions = parse_versions_from_tags(tags)
 
-    if version not in certified:
+    if version not in versions:
         raise ValueError(
-            f'No certified GitHub release found for AMD GPU Operator version "{version}". '
-            f"Available certified versions: {sorted(certified.keys())}. "
+            f'No GitHub release found for AMD GPU Operator version "{version}". '
+            f"Available versions: {sorted(versions.keys())}. "
             f"Check https://github.com/ROCm/gpu-operator/releases"
         )
 
-    resolved = certified[version]
+    resolved = versions[version]
     print(f"Resolved AMD GPU Operator {version} -> {resolved}")
     return resolved
