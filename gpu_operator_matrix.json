@@ -83,6 +83,20 @@
         "notes": [],
         "release_tests": [
             {
+                "ocp_full_version": "4.18.41",
+                "gpu_operator_version": "1.4.1",
+                "test_status": "SUCCESS",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/pull/rh-ecosystem-edge_amd-ci/110/pull-ci-rh-ecosystem-edge-amd-ci-main-4.18-stable-e2e-amd-ci-1-4-x/2054537337941004288",
+                "job_timestamp": "1778682289"
+            },
+            {
+                "ocp_full_version": "4.18.41",
+                "gpu_operator_version": "1.3.1",
+                "test_status": "SUCCESS",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/pull/rh-ecosystem-edge_amd-ci/110/pull-ci-rh-ecosystem-edge-amd-ci-main-4.18-stable-e2e-amd-ci-1-3-x/2054497962247065600",
+                "job_timestamp": "1778670439"
+            },
+            {
                 "ocp_full_version": "4.18.40",
                 "gpu_operator_version": "1.4.1",
                 "test_status": "SUCCESS",
@@ -387,6 +401,20 @@
     "4.19": {
         "notes": [],
         "release_tests": [
+            {
+                "ocp_full_version": "4.19.31",
+                "gpu_operator_version": "1.4.1",
+                "test_status": "FAILURE",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/pull/rh-ecosystem-edge_amd-ci/110/pull-ci-rh-ecosystem-edge-amd-ci-main-4.19-stable-e2e-amd-ci-1-4-x/2054555117490802688",
+                "job_timestamp": "1778687531"
+            },
+            {
+                "ocp_full_version": "4.19.31",
+                "gpu_operator_version": "1.3.1",
+                "test_status": "SUCCESS",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/pull/rh-ecosystem-edge_amd-ci/110/pull-ci-rh-ecosystem-edge-amd-ci-main-4.19-stable-e2e-amd-ci-1-3-x/2054530542161891328",
+                "job_timestamp": "1778678452"
+            },
             {
                 "ocp_full_version": "4.19.30",
                 "gpu_operator_version": "1.4.1",
