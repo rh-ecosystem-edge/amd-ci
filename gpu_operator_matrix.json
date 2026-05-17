@@ -3,6 +3,13 @@
         "notes": [],
         "release_tests": [
             {
+                "ocp_full_version": "4.20.23",
+                "gpu_operator_version": "1.5.0",
+                "test_status": "SUCCESS",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/pull/rh-ecosystem-edge_amd-ci/113/pull-ci-rh-ecosystem-edge-amd-ci-main-4.20-stable-e2e-amd-ci-1-5-x/2055934781245362176",
+                "job_timestamp": "1779015127"
+            },
+            {
                 "ocp_full_version": "4.20.21",
                 "gpu_operator_version": "1.3.1",
                 "test_status": "FAILURE",
@@ -76,12 +83,27 @@
         "job_history_links": [
             "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.20-stable-e2e-amd-ci",
             "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.20-stable-e2e-amd-ci-1-3-x",
-            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.20-stable-e2e-amd-ci-1-4-x"
+            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.20-stable-e2e-amd-ci-1-4-x",
+            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.20-stable-e2e-amd-ci-1-5-x"
         ]
     },
     "4.18": {
         "notes": [],
         "release_tests": [
+            {
+                "ocp_full_version": "4.18.42",
+                "gpu_operator_version": "1.4.1",
+                "test_status": "SUCCESS",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/pull/rh-ecosystem-edge_amd-ci/113/pull-ci-rh-ecosystem-edge-amd-ci-main-4.18-stable-e2e-amd-ci-1-4-x/2055995121781968896",
+                "job_timestamp": "1779029673"
+            },
+            {
+                "ocp_full_version": "4.18.41",
+                "gpu_operator_version": "1.5.0",
+                "test_status": "SUCCESS",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/pull/rh-ecosystem-edge_amd-ci/113/pull-ci-rh-ecosystem-edge-amd-ci-main-4.18-stable-e2e-amd-ci-1-5-x/2054921881483481088",
+                "job_timestamp": "1778775549"
+            },
             {
                 "ocp_full_version": "4.18.40",
                 "gpu_operator_version": "1.4.1",
@@ -156,12 +178,27 @@
         "job_history_links": [
             "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.18-stable-e2e-amd-ci",
             "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.18-stable-e2e-amd-ci-1-3-x",
-            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.18-stable-e2e-amd-ci-1-4-x"
+            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.18-stable-e2e-amd-ci-1-4-x",
+            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.18-stable-e2e-amd-ci-1-5-x"
         ]
     },
     "4.21": {
         "notes": [],
         "release_tests": [
+            {
+                "ocp_full_version": "4.21.16",
+                "gpu_operator_version": "1.5.0",
+                "test_status": "SUCCESS",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/pull/rh-ecosystem-edge_amd-ci/113/pull-ci-rh-ecosystem-edge-amd-ci-main-4.21-stable-e2e-amd-ci-1-5-x/2055934669827870720",
+                "job_timestamp": "1779011590"
+            },
+            {
+                "ocp_full_version": "4.21.16",
+                "gpu_operator_version": "1.4.1",
+                "test_status": "FAILURE",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/pull/rh-ecosystem-edge_amd-ci/113/pull-ci-rh-ecosystem-edge-amd-ci-main-4.21-stable-e2e-amd-ci-1-4-x/2055885491240177664",
+                "job_timestamp": "1779002045"
+            },
             {
                 "ocp_full_version": "4.21.14",
                 "gpu_operator_version": "1.4.1",
@@ -271,12 +308,27 @@
         "job_history_links": [
             "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.21-stable-e2e-amd-ci",
             "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.21-stable-e2e-amd-ci-1-3-x",
-            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.21-stable-e2e-amd-ci-1-4-x"
+            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.21-stable-e2e-amd-ci-1-4-x",
+            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.21-stable-e2e-amd-ci-1-5-x"
         ]
     },
     "4.17": {
         "notes": [],
         "release_tests": [
+            {
+                "ocp_full_version": "4.17.54",
+                "gpu_operator_version": "1.4.1",
+                "test_status": "SUCCESS",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/pull/rh-ecosystem-edge_amd-ci/113/pull-ci-rh-ecosystem-edge-amd-ci-main-4.17-stable-e2e-amd-ci-1-4-x/2055986377190805504",
+                "job_timestamp": "1779026046"
+            },
+            {
+                "ocp_full_version": "4.17.53",
+                "gpu_operator_version": "1.5.0",
+                "test_status": "FAILURE",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/pull/rh-ecosystem-edge_amd-ci/113/pull-ci-rh-ecosystem-edge-amd-ci-main-4.17-stable-e2e-amd-ci-1-5-x/2054922270366765056",
+                "job_timestamp": "1778772110"
+            },
             {
                 "ocp_full_version": "4.17.53",
                 "gpu_operator_version": "1.4.1",
@@ -316,12 +368,27 @@
         "job_history_links": [
             "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.17-stable-e2e-amd-ci",
             "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.17-stable-e2e-amd-ci-1-3-x",
-            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.17-stable-e2e-amd-ci-1-4-x"
+            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.17-stable-e2e-amd-ci-1-4-x",
+            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.17-stable-e2e-amd-ci-1-5-x"
         ]
     },
     "4.16": {
         "notes": [],
         "release_tests": [
+            {
+                "ocp_full_version": "4.16.62",
+                "gpu_operator_version": "1.5.0",
+                "test_status": "FAILURE",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/pull/rh-ecosystem-edge_amd-ci/113/pull-ci-rh-ecosystem-edge-amd-ci-main-4.16-stable-e2e-amd-ci-1-5-x/2055042636598743040",
+                "job_timestamp": "1778799794"
+            },
+            {
+                "ocp_full_version": "4.16.62",
+                "gpu_operator_version": "1.4.1",
+                "test_status": "SUCCESS",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/pull/rh-ecosystem-edge_amd-ci/113/pull-ci-rh-ecosystem-edge-amd-ci-main-4.16-stable-e2e-amd-ci-1-4-x/2055014709375012864",
+                "job_timestamp": "1778792871"
+            },
             {
                 "ocp_full_version": "4.16.61",
                 "gpu_operator_version": "1.3.1",
@@ -381,12 +448,27 @@
         ],
         "job_history_links": [
             "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.16-stable-e2e-amd-ci-1-3-x",
-            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.16-stable-e2e-amd-ci-1-4-x"
+            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.16-stable-e2e-amd-ci-1-4-x",
+            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.16-stable-e2e-amd-ci-1-5-x"
         ]
     },
     "4.19": {
         "notes": [],
         "release_tests": [
+            {
+                "ocp_full_version": "4.19.31",
+                "gpu_operator_version": "1.4.1",
+                "test_status": "SUCCESS",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/pull/rh-ecosystem-edge_amd-ci/113/pull-ci-rh-ecosystem-edge-amd-ci-main-4.19-stable-e2e-amd-ci-1-4-x/2055970559245684736",
+                "job_timestamp": "1779022195"
+            },
+            {
+                "ocp_full_version": "4.19.31",
+                "gpu_operator_version": "1.5.0",
+                "test_status": "SUCCESS",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/pull/rh-ecosystem-edge_amd-ci/113/pull-ci-rh-ecosystem-edge-amd-ci-main-4.19-stable-e2e-amd-ci-1-5-x/2054965782672052224",
+                "job_timestamp": "1778781516"
+            },
             {
                 "ocp_full_version": "4.19.30",
                 "gpu_operator_version": "1.4.1",
@@ -461,7 +543,8 @@
         "job_history_links": [
             "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.19-stable-e2e-amd-ci",
             "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.19-stable-e2e-amd-ci-1-3-x",
-            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.19-stable-e2e-amd-ci-1-4-x"
+            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.19-stable-e2e-amd-ci-1-4-x",
+            "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.19-stable-e2e-amd-ci-1-5-x"
         ]
     },
     "4.22": {
