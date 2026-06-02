@@ -163,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
             machine_config_role=machine_config_role,
             gpu_operator_version=gpu_version,
             driver_version=config.operators.driver_version,
+            enable_driver=config.operators.enable_driver,
             enable_metrics=config.operators.enable_metrics,
             ocp_version=config.ocp_version,
         )

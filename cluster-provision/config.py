@@ -43,6 +43,7 @@ class OperatorsConfig:
     machine_config_role: str
     driver_version: str
     enable_metrics: bool
+    enable_driver: bool = True
 
 
 @dataclass
@@ -217,6 +218,7 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
             machine_config_role=operators_data["machine_config_role"],
             driver_version=str(operators_data["driver_version"]),
             enable_metrics=operators_data["enable_metrics"],
+            enable_driver=operators_data.get("enable_driver", True),
         )
 
         must_gather_data = raw_config.get("must_gather", {})

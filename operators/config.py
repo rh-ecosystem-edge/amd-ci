@@ -165,15 +165,21 @@ def create_device_config(
     oc: OcRunner,
     driver_version: str = DEFAULT_DRIVER_VERSION,
     driver_image: str | None = None,
+    enable_driver: bool = True,
     enable_metrics: bool = True,
     api_version: str = "amd.com/v1alpha1",
 ) -> None:
     """
     Create DeviceConfig CR to trigger GPU driver installation and optional metrics.
     api_version should match the AMD GPU Operator CSV (e.g. from wait_for_device_config_crd).
+    Set enable_driver=False to use the in-tree amdgpu kernel module instead of KMM build.
     """
     print("Creating DeviceConfig...")
     image = driver_image or DEFAULT_DRIVER_IMAGE
+    driver_block = f"""  driver:
+    enable: {str(enable_driver).lower()}
+    image: {image}
+    version: {driver_version}"""
     metrics_block = ""
     if enable_metrics:
         metrics_block = """
@@ -192,10 +198,7 @@ metadata:
   name: {DEVICECONFIG_NAME}
   namespace: {NAMESPACE_AMD_GPU}
 spec:
-  driver:
-    enable: true
-    image: {image}
-    version: {driver_version}
+{driver_block}
   devicePlugin:
     enableNodeLabeller: true
   selector:

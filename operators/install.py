@@ -36,7 +36,7 @@ def ensure_namespace(oc: OcRunner, name: str) -> None:
     if r.returncode == 0:
         return
     r = oc.oc("create", "namespace", name, timeout=10)
-    if r.returncode != 0:
+    if r.returncode != 0 and "AlreadyExists" not in (r.stderr or r.stdout):
         raise OperatorError(f"Failed to create namespace {name}: {r.stderr or r.stdout}")
 
 
@@ -91,6 +91,56 @@ spec:
 {starting_csv_block}
 """
     oc.apply_yaml(yaml)
+
+
+def _approve_any_pending_install_plan(
+    oc: OcRunner, namespace: str, csv_name: str, timeout: int = 300
+) -> None:
+    """Approve the first unapproved InstallPlan in namespace.
+
+    Used when OLM may resolve startingCSV to a different (newer) version.
+    Falls back to approving any unapproved plan if none matches csv_name exactly.
+    """
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
+        r = oc.oc("get", "installplan", "-n", namespace, "-o", "json", timeout=15)
+        if r.returncode == 0 and r.stdout:
+            try:
+                items = json.loads(r.stdout).get("items", [])
+            except json.JSONDecodeError:
+                items = []
+            # Prefer a plan that matches csv_name exactly; fall back to any unapproved plan.
+            exact_match = next(
+                (ip for ip in items
+                 if csv_name in ((ip.get("spec") or {}).get("clusterServiceVersionNames") or [])
+                 and not (ip.get("spec") or {}).get("approved", False)),
+                None,
+            )
+            fallback = next(
+                (ip for ip in items if not (ip.get("spec") or {}).get("approved", False)),
+                None,
+            ) if exact_match is None else None
+            to_approve = exact_match or fallback
+            if to_approve is not None:
+                ip_name = to_approve["metadata"]["name"]
+                csvs = (to_approve.get("spec") or {}).get("clusterServiceVersionNames") or []
+                print(f"  Approving InstallPlan {ip_name} for {csvs}...")
+                patch_r = oc.oc(
+                    "patch", "installplan", ip_name, "-n", namespace,
+                    "--type", "merge", "-p", '{"spec":{"approved":true}}',
+                    timeout=15,
+                )
+                if patch_r.returncode == 0:
+                    return
+                print(f"  Patch failed: {patch_r.stderr or patch_r.stdout}, retrying...")
+        time.sleep(10)
+    # If all plans are already approved (OLM auto-approved), that is also fine.
+    r = oc.oc("get", "installplan", "-n", namespace, "-o", "json", timeout=15)
+    if r.returncode == 0 and r.stdout:
+        items = json.loads(r.stdout or "{}").get("items", [])
+        if all((ip.get("spec") or {}).get("approved", False) for ip in items if items):
+            return
+    raise OperatorError(f"Timeout ({timeout}s) waiting to approve InstallPlan in {namespace}")
 
 
 def approve_install_plan(
@@ -415,8 +465,14 @@ def install_amd_gpu_operator(
         starting_csv=starting_csv,
         manual_approval=True,
     )
-    approve_install_plan(oc, NAMESPACE_AMD_GPU, starting_csv, timeout=timeout)
-    wait_for_csv_by_name(oc, NAMESPACE_AMD_GPU, starting_csv, timeout=timeout)
+    # OLM may resolve the startingCSV to a newer version in the channel.
+    # Approve any pending install plan (for startingCSV or the resolved version).
+    _approve_any_pending_install_plan(oc, NAMESPACE_AMD_GPU, starting_csv, timeout=timeout)
+    # Use the subscription's installedCSV (may differ from startingCSV).
+    actual_csv = wait_for_subscription_installed(oc, NAMESPACE_AMD_GPU, "amd-gpu-operator", timeout=timeout)
+    if actual_csv != starting_csv:
+        print(f"  OLM resolved {starting_csv} -> {actual_csv}")
+    wait_for_csv_by_name(oc, NAMESPACE_AMD_GPU, actual_csv, timeout=timeout)
     print("  AMD GPU Operator installed.")
 
 

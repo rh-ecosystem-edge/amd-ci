@@ -12,7 +12,8 @@ Steps (in order, matching eco-gotests BeforeAll and AMD docs):
 8. Create NodeFeatureDiscovery instance (starts NFD pods)
 9. Create NodeFeatureRule (separate CR for AMD GPU detection, per docs)
 10. Wait for NFD to label nodes
-11. Create DeviceConfig
+11. Pre-pull Docker Hub images on all nodes (busybox, device-plugin, metrics-exporter, rocm-terminal)
+12. Create DeviceConfig
 12. Enable cluster monitoring
 13. Wait for cluster stability
 14. Wait for GPU resources to become available
@@ -49,6 +50,8 @@ class OperatorInstallConfig:
     gpu_operator_version: str = "1.4.1"
     # ROCm/amdgpu driver version (e.g. 30.20.1)
     driver_version: str = "30.20.1"
+    # Set False to use in-tree amdgpu driver (skips KMM build and MachineConfig blacklist)
+    enable_driver: bool = True
     # Enable metrics exporter and ServiceMonitor
     enable_metrics: bool = True
     # OCP version for NFD operand image (4.16 requires explicit image)
@@ -56,7 +59,7 @@ class OperatorInstallConfig:
     # Timeouts (seconds)
     prerequisite_timeout: int = 900
     registry_timeout: int = 120
-    operator_timeout: int = 600
+    operator_timeout: int = 1800
     cluster_stability_timeout: int = 900
     gpu_ready_timeout: int = 1800
 
@@ -281,6 +284,79 @@ def wait_for_mcp_updated(
     )
 
 
+def _prepull_dockerhub_images(
+    oc: OcRunner,
+    gpu_operator_version: str,
+    enable_metrics: bool,
+) -> None:
+    """Pre-pull Docker Hub images on all cluster nodes before creating DeviceConfig.
+
+    The AMD GPU operator DaemonSets use several Docker Hub images as init
+    containers and workloads. On a fresh cluster these pulls can fail with
+    'toomanyrequests' from anonymous rate limiting. Pre-pulling via
+    'oc debug node' populates the CRI-O image cache before the operator
+    creates pods, making the install unattended.
+    """
+    images = [
+        "docker.io/library/busybox:1.36",
+        "docker.io/rocm/k8s-device-plugin:rhubi-latest",
+        "docker.io/rocm/rocm-terminal:latest",
+    ]
+    if enable_metrics:
+        images.append(f"docker.io/rocm/device-metrics-exporter:v{gpu_operator_version}")
+
+    r = oc.oc("get", "nodes", "-o", "jsonpath={.items[*].metadata.name}", timeout=15)
+    if r.returncode != 0 or not r.stdout.strip():
+        print("  Could not get node list; skipping pre-pull.")
+        return
+    nodes = r.stdout.strip().split()
+
+    print(f"Pre-pulling {len(images)} Docker Hub image(s) on {len(nodes)} node(s)...")
+    for node in nodes:
+        for image in images:
+            print(f"  Pulling {image} on {node}...")
+            result = oc.oc(
+                "debug", f"node/{node}", "--quiet", "--",
+                "chroot", "/host", "podman", "pull", image,
+                timeout=600,
+            )
+            if result.returncode == 0:
+                print(f"    OK")
+            else:
+                msg = (result.stderr or result.stdout or "").strip()[:200]
+                print(f"    Warning: pre-pull failed ({msg}); pods will retry via backoff.")
+
+
+def _ensure_amdgpu_module(oc: OcRunner) -> None:
+    """Load the in-tree amdgpu kernel module on all AMD GPU nodes.
+
+    Required when enable_driver=False: the operator's driver-init init
+    container waits for /sys/class/kfd and /sys/module/amdgpu/drivers/,
+    which only exist after the module is loaded. In KVM PCI-passthrough
+    environments the module does not auto-load via udev, so we trigger it
+    explicitly via `oc debug node`.
+    """
+    r = oc.oc("get", "nodes", "-l", "feature.node.kubernetes.io/amd-gpu=true",
+              "-o", "jsonpath={.items[*].metadata.name}", timeout=15)
+    if r.returncode != 0 or not r.stdout.strip():
+        print("  _ensure_amdgpu_module: no AMD GPU nodes found, skipping.")
+        return
+
+    nodes = r.stdout.strip().split()
+    for node in nodes:
+        print(f"  Loading amdgpu module on {node}...")
+        result = oc.oc(
+            "debug", f"node/{node}", "--quiet", "--",
+            "chroot", "/host", "modprobe", "amdgpu",
+            timeout=120,
+        )
+        if result.returncode == 0:
+            print(f"    amdgpu module loaded on {node}.")
+        else:
+            print(f"    Warning: modprobe amdgpu on {node} returned {result.returncode}: "
+                  f"{result.stderr or result.stdout}")
+
+
 def install_operators(
     oc: OcRunner,
     config: OperatorInstallConfig | None = None,
@@ -299,10 +375,11 @@ def install_operators(
     8. Create NodeFeatureDiscovery instance (starts NFD pods)
     9. Create NodeFeatureRule (separate CR for AMD GPU detection)
     10. Wait for NFD to label nodes
-    11. Create DeviceConfig
-    12. Enable cluster monitoring
-    13. Wait for cluster stability
-    14. Wait for GPU resources (device-plugin pods + amd.com/gpu capacity)
+    11. Pre-pull Docker Hub images on all nodes (avoids rate-limit failures)
+    12. Create DeviceConfig
+    13. Enable cluster monitoring
+    14. Wait for cluster stability
+    15. Wait for GPU resources (device-plugin pods + amd.com/gpu capacity)
     """
     cfg = config or OperatorInstallConfig()
     print("\n" + "=" * 60)
@@ -314,10 +391,12 @@ def install_operators(
 
     wait_for_cluster_stability(oc, timeout=cfg.cluster_stability_timeout)
 
-    # MachineConfig BEFORE operators — reboot would kill operator pods.
-    create_amdgpu_blacklist(oc, role=cfg.machine_config_role)
-    wait_for_mcp_updated(oc)
-    wait_for_cluster_stability(oc, timeout=cfg.cluster_stability_timeout)
+    if cfg.enable_driver:
+        # MachineConfig BEFORE operators — reboot would kill operator pods.
+        # Only needed for out-of-tree KMM driver; in-tree driver uses amdgpu directly.
+        create_amdgpu_blacklist(oc, role=cfg.machine_config_role)
+        wait_for_mcp_updated(oc)
+        wait_for_cluster_stability(oc, timeout=cfg.cluster_stability_timeout)
 
     install_all_operators(
         oc,
@@ -331,17 +410,24 @@ def install_operators(
     print("Waiting for NFD to label nodes (60s)...")
     time.sleep(60)
 
+    _prepull_dockerhub_images(oc, cfg.gpu_operator_version, cfg.enable_metrics)
+
     print("Waiting for DeviceConfig CRD (AMD GPU Operator)...")
     api_version = wait_for_device_config_crd(oc, timeout=180)
     create_device_config(
         oc,
         driver_version=cfg.driver_version,
+        enable_driver=cfg.enable_driver,
         enable_metrics=cfg.enable_metrics,
         api_version=api_version,
     )
     enable_cluster_monitoring(oc)
 
     wait_for_cluster_stability(oc, timeout=cfg.cluster_stability_timeout)
+
+    if not cfg.enable_driver:
+        _ensure_amdgpu_module(oc)
+
     wait_for_gpu_ready(oc, timeout=cfg.gpu_ready_timeout)
 
     print("\n" + "=" * 60)

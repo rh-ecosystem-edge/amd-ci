@@ -21,6 +21,11 @@ def resolve_latest_patch(version: str, timeout: int = 30) -> str:
     Raises:
         ValueError: If no release is found for the given version.
     """
+    # If already a full patch version (major.minor.patch), skip GitHub lookup.
+    if version.count(".") >= 2:
+        print(f"Resolved AMD GPU Operator {version} -> {version} (already pinned)")
+        return version
+
     tags = fetch_release_tags(timeout=timeout)
     versions = parse_versions_from_tags(tags)
 

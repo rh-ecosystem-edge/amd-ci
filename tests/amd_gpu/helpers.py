@@ -9,6 +9,10 @@ from kubernetes import client
 from kubernetes.client.rest import ApiException
 
 from tests.amd_gpu.constants import (
+    DEVICECONFIG_GROUP,
+    DEVICECONFIG_NAME,
+    DEVICECONFIG_PLURAL,
+    DEVICECONFIG_VERSION,
     GPU_RESOURCE_NAME,
     NAMESPACE_AMD_GPU,
     POD_COMPLETION_POLL_INTERVAL,
@@ -138,6 +142,83 @@ def describe_pod_status(pod: client.V1Pod) -> str:
 
 
 # ---------------------------------------------------------------------------
+# DeviceConfig patch helpers
+# ---------------------------------------------------------------------------
+
+
+def patch_device_config(
+    custom_api: client.CustomObjectsApi,
+    patch: dict,
+) -> None:
+    """Apply a merge-patch to the DeviceConfig CR."""
+    custom_api.patch_namespaced_custom_object(
+        DEVICECONFIG_GROUP,
+        DEVICECONFIG_VERSION,
+        NAMESPACE_AMD_GPU,
+        DEVICECONFIG_PLURAL,
+        DEVICECONFIG_NAME,
+        patch,
+    )
+
+
+def wait_for_pods_gone(
+    core_api: client.CoreV1Api,
+    namespace: str,
+    prefix: str,
+    timeout: int = 120,
+    poll_interval: int = 5,
+) -> None:
+    """Block until no pods whose name starts with *prefix* exist in *namespace*.
+
+    Raises ``TimeoutError`` listing the still-present pod names if *timeout*
+    expires before they are all gone.
+    """
+    deadline = time.monotonic() + timeout
+    remaining: list[str] = []
+    while time.monotonic() < deadline:
+        pods = core_api.list_namespaced_pod(namespace).items
+        remaining = [p.metadata.name for p in pods if p.metadata.name.startswith(prefix)]
+        if not remaining:
+            return
+        logger.debug("Waiting for pods to be gone: %s", remaining)
+        time.sleep(poll_interval)
+    raise TimeoutError(
+        f"Pods with prefix '{prefix}' still present after {timeout}s: {remaining}"
+    )
+
+
+def wait_for_pods_running_by_prefix(
+    core_api: client.CoreV1Api,
+    namespace: str,
+    prefix: str,
+    min_count: int = 1,
+    timeout: int = 180,
+    poll_interval: int = 5,
+) -> None:
+    """Block until at least *min_count* pods with *prefix* are Running.
+
+    Raises ``TimeoutError`` if the condition is not met within *timeout* seconds.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        pods = core_api.list_namespaced_pod(namespace).items
+        running = [
+            p for p in pods
+            if p.metadata.name.startswith(prefix) and p.status.phase == "Running"
+        ]
+        if len(running) >= min_count:
+            return
+        logger.debug(
+            "Waiting for %d Running pod(s) with prefix '%s'; found %d",
+            min_count, prefix, len(running),
+        )
+        time.sleep(poll_interval)
+    raise TimeoutError(
+        f"Fewer than {min_count} Running pod(s) with prefix '{prefix}' after {timeout}s"
+    )
+
+
+# ---------------------------------------------------------------------------
 # GPU command runner
 # ---------------------------------------------------------------------------
 
@@ -184,6 +265,7 @@ def run_gpu_command(
                 client.V1Container(
                     name=pod_name,
                     image=image,
+                    image_pull_policy="IfNotPresent",
                     command=command,
                     resources=client.V1ResourceRequirements(
                         requests={GPU_RESOURCE_NAME: gpu_count},

@@ -32,6 +32,10 @@ NFD_LABEL_VALUE = "true"
 # ---------------------------------------------------------------------------
 DEVICE_PLUGIN_PREFIX = f"{DEVICECONFIG_NAME}-device-plugin-"
 NODE_LABELLER_PREFIX = f"{DEVICECONFIG_NAME}-node-labeller-"
+METRICS_EXPORTER_PREFIX = os.environ.get(
+    "AMD_METRICS_EXPORTER_PREFIX",
+    f"{DEVICECONFIG_NAME}-metrics-exporter-",
+)
 
 # ---------------------------------------------------------------------------
 # ROCm test image
