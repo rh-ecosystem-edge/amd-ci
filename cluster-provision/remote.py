@@ -405,19 +405,28 @@ def wait_for_cluster_ready(
     """
     Wait for the cluster to be ready by checking via the remote host.
     Returns True if cluster is ready, raises DeployError on timeout.
+
+    OCP SNO install goes through multiple Available/Progressing phases; we
+    don't require Available=True AND Progressing=False simultaneously (that
+    combination can take hours on 4.21 SNO).  Instead we declare success once
+    Available=True has been observed continuously for STABILITY_WINDOW seconds.
     """
+    STABILITY_WINDOW = 120   # seconds Available=True must hold before we proceed
+    POLL_INTERVAL   = 30
+
     print(f"Waiting for cluster to be ready (timeout: {timeout}s)...")
-    
-    start_time = time.time()
-    api_ready = False
-    
+
+    start_time      = time.time()
+    api_ready       = False
+    available_since = None   # time.time() when Available first became True
+
     while True:
         elapsed = int(time.time() - start_time)
-        
+
         if elapsed >= timeout:
             raise DeployError(f"Timeout waiting for cluster to be ready after {timeout}s")
-        
-        # Check if API is responding
+
+        # ── Phase 1: wait for the Kubernetes API to answer ────────────────────
         if not api_ready:
             result = ssh_cmd(host, user, f"curl -sk https://{api_ip}:6443/version", check=False)
             if "gitVersion" in result.stdout:
@@ -425,46 +434,56 @@ def wait_for_cluster_ready(
                 api_ready = True
             else:
                 print(f"  Waiting for Kubernetes API... ({elapsed}s)")
-                time.sleep(30)
+                time.sleep(POLL_INTERVAL)
                 continue
-        
-        # Check cluster version status using oc get with simple output parsing
-        # Complex jsonpath doesn't work well over SSH, so we parse the table output
+
+        # ── Phase 2: poll clusterversion via jsonpath ─────────────────────────
+        # Using grep-based extraction rather than jsonpath to avoid shell quoting
+        # issues with single-vs-double quotes over SSH.
         cv_result = ssh_cmd(
             host, user,
             "export KUBECONFIG=/root/kubeconfig; "
-            "oc get clusterversion version --no-headers 2>/dev/null || echo ''",
-            check=False
+            "oc get clusterversion version -o json 2>/dev/null | "
+            "python3 -c \""
+            "import json,sys; d=json.load(sys.stdin); conds={c['type']:c['status'] for c in d.get('status',{}).get('conditions',[])}; "
+            "print(conds.get('Available','')+'|'+conds.get('Progressing',''))"
+            "\" 2>/dev/null || echo '|'",
+            check=False,
         ).stdout.strip()
-        
-        # Parse: NAME VERSION AVAILABLE PROGRESSING SINCE STATUS
-        # Example: version 4.20.6 True False 10m Cluster version is 4.20.6
-        cv_available = ""
-        cv_progressing = ""
-        if cv_result:
-            parts = cv_result.split()
-            if len(parts) >= 4:
-                cv_available = parts[2]    # AVAILABLE column
-                cv_progressing = parts[3]  # PROGRESSING column
-        
-        if cv_available == "True" and cv_progressing == "False":
-            print(f"\n{'='*50}")
-            print("SUCCESS! Cluster is ready!")
-            print(f"{'='*50}")
-            return True
-        
+
+        parts = cv_result.split("|")
+        cv_available   = parts[0] if len(parts) > 0 else ""
+        cv_progressing = parts[1] if len(parts) > 1 else ""
+
+        now = time.time()
+        if cv_available == "True":
+            if available_since is None:
+                available_since = now
+                print(f"  Available=True first seen at {elapsed}s — waiting {STABILITY_WINDOW}s for stability...")
+            stable_for = int(now - available_since)
+            if stable_for >= STABILITY_WINDOW:
+                print(f"\n{'='*50}")
+                print(f"SUCCESS! Cluster Available=True for {stable_for}s (Progressing={cv_progressing or 'Unknown'})")
+                print(f"{'='*50}")
+                return True
+        else:
+            if available_since is not None:
+                print(f"  Available dropped back to {cv_available or 'Unknown'} at {elapsed}s — resetting stability timer")
+            available_since = None
+
         # Show current status
         node_status = ssh_cmd(
             host, user,
             "export KUBECONFIG=/root/kubeconfig; oc get nodes --no-headers 2>/dev/null | head -1",
-            check=False
+            check=False,
         ).stdout.strip()
-        
-        print(f"  Cluster status: Available={cv_available or 'Unknown'}, Progressing={cv_progressing or 'Unknown'} ({elapsed}s)")
+
+        stable_info = f", stable for {int(now - available_since)}s" if available_since else ""
+        print(f"  Cluster status: Available={cv_available or 'Unknown'}, Progressing={cv_progressing or 'Unknown'}{stable_info} ({elapsed}s)")
         if node_status:
             print(f"  Node: {node_status}")
-        
-        time.sleep(30)
+
+        time.sleep(POLL_INTERVAL)
 
 
 def get_cluster_status(host: str, user: str) -> str:
@@ -607,8 +626,9 @@ def attach_pci_devices(
         # Attach device to VM (persistent config)
         result = ssh_cmd(host, user, f"virsh attach-device {vm_name} {xml_file} --config", check=False)
         if result.returncode != 0:
-            if "already exists" in result.stderr.lower() or "already attached" in result.stderr.lower():
-                print(f"    Device {pci_addr} already attached.")
+            already = ("already exists", "already attached", "already in the domain")
+            if any(s in result.stderr.lower() for s in already):
+                print(f"    Device {pci_addr} already in VM config, skipping.")
             else:
                 raise DeployError(f"Failed to attach PCI device {pci_addr}: {result.stderr}")
         else:
