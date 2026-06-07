@@ -353,8 +353,10 @@ def _ensure_amdgpu_module(oc: OcRunner) -> None:
         if result.returncode == 0:
             print(f"    amdgpu module loaded on {node}.")
         else:
-            print(f"    Warning: modprobe amdgpu on {node} returned {result.returncode}: "
-                  f"{result.stderr or result.stdout}")
+            raise RuntimeError(
+                f"modprobe amdgpu failed on {node} "
+                f"(rc={result.returncode}): {result.stderr or result.stdout}"
+            )
 
 
 def install_operators(
@@ -402,6 +404,7 @@ def install_operators(
         oc,
         gpu_operator_version=cfg.gpu_operator_version,
         timeout_per_operator=cfg.operator_timeout,
+        enable_driver=cfg.enable_driver,
     )
 
     create_nfd_instance(oc, ocp_version=cfg.ocp_version)

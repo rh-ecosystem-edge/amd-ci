@@ -394,6 +394,14 @@ class TestComponentCleanup:
         """Disabling ``enableNodeLabeller`` must remove labeller pods and
         GPU metadata labels from all AMD GPU nodes.
         """
+        dc = k8s_custom_api.get_namespaced_custom_object(
+            DEVICECONFIG_GROUP, DEVICECONFIG_VERSION,
+            NAMESPACE_AMD_GPU, DEVICECONFIG_PLURAL, DEVICECONFIG_NAME,
+        )
+        original_enable_node_labeller = (
+            ((dc.get("spec") or {}).get("devicePlugin") or {}).get("enableNodeLabeller", True)
+        )
+
         patch_device_config(
             k8s_custom_api,
             {"spec": {"devicePlugin": {"enableNodeLabeller": False}}},
@@ -444,17 +452,28 @@ class TestComponentCleanup:
         finally:
             patch_device_config(
                 k8s_custom_api,
-                {"spec": {"devicePlugin": {"enableNodeLabeller": True}}},
+                {"spec": {"devicePlugin": {"enableNodeLabeller": original_enable_node_labeller}}},
             )
-            logger.info("Re-enabled node labeller; waiting for pods to come back")
-            wait_for_pods_running_by_prefix(
-                k8s_core_api, NAMESPACE_AMD_GPU, NODE_LABELLER_PREFIX
-            )
+            logger.info("Restored node labeller to original value (%s); waiting for pods to come back",
+                        original_enable_node_labeller)
+            if original_enable_node_labeller:
+                wait_for_pods_running_by_prefix(
+                    k8s_core_api, NAMESPACE_AMD_GPU, NODE_LABELLER_PREFIX,
+                    min_count=len(amd_gpu_nodes),
+                )
 
-    def test_metrics_exporter_disable(self, k8s_core_api, k8s_custom_api):
+    def test_metrics_exporter_disable(self, k8s_core_api, k8s_custom_api, amd_gpu_nodes):
         """Disabling ``metricsExporter`` must remove its pods, Service, and
         ServiceMonitor (when Prometheus CRDs are installed).
         """
+        dc = k8s_custom_api.get_namespaced_custom_object(
+            DEVICECONFIG_GROUP, DEVICECONFIG_VERSION,
+            NAMESPACE_AMD_GPU, DEVICECONFIG_PLURAL, DEVICECONFIG_NAME,
+        )
+        original_enable_metrics = (
+            ((dc.get("spec") or {}).get("metricsExporter") or {}).get("enable", True)
+        )
+
         patch_device_config(
             k8s_custom_api,
             {"spec": {"metricsExporter": {"enable": False}}},
@@ -481,34 +500,52 @@ class TestComponentCleanup:
                 f"Metrics exporter pods still present after disabling: {remaining_pods}"
             )
 
-            # Service must be removed.
-            services = k8s_core_api.list_namespaced_service(NAMESPACE_AMD_GPU).items
-            remaining_svcs = [
-                svc.metadata.name
-                for svc in services
-                if svc.metadata.name.startswith(service_name_base)
-            ]
+            # Service must be removed (controller-driven, poll with timeout).
+            _RESOURCE_REMOVAL_TIMEOUT = 60
+            _RESOURCE_REMOVAL_POLL = 5
+            svc_deadline = time.monotonic() + _RESOURCE_REMOVAL_TIMEOUT
+            remaining_svcs: list[str] = []
+            while time.monotonic() < svc_deadline:
+                services = k8s_core_api.list_namespaced_service(NAMESPACE_AMD_GPU).items
+                remaining_svcs = [
+                    svc.metadata.name
+                    for svc in services
+                    if svc.metadata.name.startswith(service_name_base)
+                ]
+                if not remaining_svcs:
+                    break
+                logger.debug("Waiting for metrics exporter Service(s) to be removed: %s", remaining_svcs)
+                time.sleep(_RESOURCE_REMOVAL_POLL)
             assert not remaining_svcs, (
-                f"Metrics exporter Service(s) still present after disabling: "
-                f"{remaining_svcs}"
+                f"Metrics exporter Service(s) still present after disabling "
+                f"(waited {_RESOURCE_REMOVAL_TIMEOUT}s): {remaining_svcs}"
             )
             logger.info("Metrics exporter Service removed")
 
-            # ServiceMonitor must be removed (best-effort: skip if CRD absent).
+            # ServiceMonitor must be removed (controller-driven, poll with timeout;
+            # best-effort: skip if CRD absent).
             try:
-                monitors = k8s_custom_api.list_namespaced_custom_object(
-                    "monitoring.coreos.com",
-                    "v1",
-                    NAMESPACE_AMD_GPU,
-                    "servicemonitors",
-                )
-                remaining_sm = [
-                    sm["metadata"]["name"]
-                    for sm in (monitors.get("items") or [])
-                ]
+                sm_deadline = time.monotonic() + _RESOURCE_REMOVAL_TIMEOUT
+                remaining_sm: list[str] = []
+                while time.monotonic() < sm_deadline:
+                    monitors = k8s_custom_api.list_namespaced_custom_object(
+                        "monitoring.coreos.com",
+                        "v1",
+                        NAMESPACE_AMD_GPU,
+                        "servicemonitors",
+                    )
+                    remaining_sm = [
+                        sm["metadata"]["name"]
+                        for sm in (monitors.get("items") or [])
+                        if sm["metadata"]["name"].startswith(service_name_base)
+                    ]
+                    if not remaining_sm:
+                        break
+                    logger.debug("Waiting for ServiceMonitor(s) to be removed: %s", remaining_sm)
+                    time.sleep(_RESOURCE_REMOVAL_POLL)
                 assert not remaining_sm, (
                     f"ServiceMonitor(s) still present after disabling metrics "
-                    f"exporter: {remaining_sm}"
+                    f"exporter (waited {_RESOURCE_REMOVAL_TIMEOUT}s): {remaining_sm}"
                 )
                 logger.info("ServiceMonitor removed")
             except ApiException as exc:
@@ -522,9 +559,12 @@ class TestComponentCleanup:
         finally:
             patch_device_config(
                 k8s_custom_api,
-                {"spec": {"metricsExporter": {"enable": True}}},
+                {"spec": {"metricsExporter": {"enable": original_enable_metrics}}},
             )
-            logger.info("Re-enabled metrics exporter; waiting for pods to come back")
-            wait_for_pods_running_by_prefix(
-                k8s_core_api, NAMESPACE_AMD_GPU, METRICS_EXPORTER_PREFIX
-            )
+            logger.info("Restored metrics exporter to original value (%s); waiting for pods to come back",
+                        original_enable_metrics)
+            if original_enable_metrics:
+                wait_for_pods_running_by_prefix(
+                    k8s_core_api, NAMESPACE_AMD_GPU, METRICS_EXPORTER_PREFIX,
+                    min_count=len(amd_gpu_nodes),
+                )

@@ -212,13 +212,18 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
             pci_devices = [d.strip() for d in pci_devices.replace(",", " ").split() if d.strip()]
 
         operators_data = raw_config["operators"]
+        enable_driver = operators_data.get("enable_driver", True)
+        if not isinstance(enable_driver, bool):
+            raise ValueError(
+                f"operators.enable_driver must be a boolean (true/false), got: {enable_driver!r}"
+            )
         operators = OperatorsConfig(
             install=operators_data["install"],
             gpu_operator_version=str(operators_data["gpu_operator_version"]),
             machine_config_role=operators_data["machine_config_role"],
             driver_version=str(operators_data["driver_version"]),
             enable_metrics=operators_data["enable_metrics"],
-            enable_driver=operators_data.get("enable_driver", True),
+            enable_driver=enable_driver,
         )
 
         must_gather_data = raw_config.get("must_gather", {})

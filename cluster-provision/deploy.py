@@ -40,9 +40,9 @@ def patch_bootstrap_ignition(cluster_name: str) -> bool:
 
     try:
         data = json.loads(ign_path.read_text())
-    except Exception as e:
+    except (json.JSONDecodeError, OSError) as e:
         print(f"  bootstrap.ign patch: failed to parse JSON: {e}")
-        return True
+        return False
 
     patched_count = 0
     for item in data.get("storage", {}).get("files", []):
@@ -118,6 +118,9 @@ else:
 """
 
     r = ssh_cmd(host, user, f"python3 -c {shlex.quote(patch_script)}", check=False)
+    if r.returncode != 0:
+        print(f"  remote bootstrap.ign patch failed: {(r.stderr or r.stdout or '').strip()}")
+        return False
     msg = (r.stdout or "").strip()
     if msg:
         print(f"  {msg}")
@@ -405,15 +408,48 @@ def deploy_local(
     """Deploy OpenShift cluster locally using kcli."""
     ensure_kcli_config()
 
+    cluster_name = params["cluster"]
     topology = get_cluster_topology_description(ctlplanes, workers)
 
     # Build kcli command with all parameters via -P flags
     kcli_cmd = ["kcli", "create", "cluster", "openshift"]
     kcli_cmd.extend(build_kcli_params(params))
-    
+
     print(f"\nStarting OpenShift deployment [{topology}] with kcli...")
     print(f"  kcli command: {' '.join(kcli_cmd)}")
-    run(kcli_cmd, check=True)
+
+    kcli_process = subprocess.Popen(
+        kcli_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    def _stream_kcli(proc: subprocess.Popen) -> None:
+        for line in iter(proc.stdout.readline, ""):
+            print(f"[kcli] {line}", end="", flush=True)
+
+    threading.Thread(target=_stream_kcli, args=(kcli_process,), daemon=True).start()
+
+    # Patch bootstrap.ign as soon as kcli generates it — same URL bug applies locally.
+    ign_patch_timeout = 300
+    ign_wait_start = time.time()
+    local_patched = False
+    while not local_patched and kcli_process.poll() is None:
+        local_patched = patch_bootstrap_ignition(cluster_name)
+        if local_patched:
+            print("  Local bootstrap.ign processed.")
+            break
+        elapsed = int(time.time() - ign_wait_start)
+        if elapsed >= ign_patch_timeout:
+            print(f"  Timeout waiting for bootstrap.ign ({elapsed}s) — skipping patch.")
+            break
+        time.sleep(2)
+
+    kcli_process.wait()
+    if kcli_process.returncode != 0:
+        raise DeployError(f"kcli deployment failed with exit code {kcli_process.returncode}")
+
     print(f"\nOpenShift deployment [{topology}] command has completed.")
     print("Check 'kcli list' and the OpenShift console once the cluster is fully up.")
 

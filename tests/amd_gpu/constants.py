@@ -79,11 +79,6 @@ DEVICE_IDS: dict[str, str] = {
     "738e": "MI100",
 }
 
-# ---------------------------------------------------------------------------
-# Metrics exporter
-# ---------------------------------------------------------------------------
-METRICS_EXPORTER_PREFIX = f"{DEVICECONFIG_NAME}-metrics-exporter-"
-
 # Core Prometheus metric names expected in the /metrics response.
 # These correspond to the amd_ prefixed fields from the device-metrics-exporter.
 EXPECTED_METRICS = [

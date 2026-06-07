@@ -93,34 +93,59 @@ spec:
     oc.apply_yaml(yaml)
 
 
+def _get_subscription_install_plan_ref(oc: OcRunner, namespace: str, subscription_name: str) -> str | None:
+    """Return the InstallPlan name from the subscription's status.installPlanRef, or None."""
+    r = oc.oc(
+        "get", "subscription", subscription_name, "-n", namespace,
+        "-o", "jsonpath={.status.installPlanRef.name}",
+        timeout=10,
+    )
+    if r.returncode == 0:
+        name = (r.stdout or "").strip()
+        return name if name else None
+    return None
+
+
 def _approve_any_pending_install_plan(
     oc: OcRunner, namespace: str, csv_name: str, timeout: int = 300
 ) -> None:
-    """Approve the first unapproved InstallPlan in namespace.
+    """Approve the InstallPlan for csv_name in namespace.
 
-    Used when OLM may resolve startingCSV to a different (newer) version.
-    Falls back to approving any unapproved plan if none matches csv_name exactly.
+    Prefers the plan referenced by the subscription's installPlanRef so reruns
+    cannot accidentally approve a stale plan from a previous attempt.
+    Falls back to an exact CSV-name match if the subscription ref is not yet set.
     """
+    subscription_name = "amd-gpu-operator"
     start = time.monotonic()
     while time.monotonic() - start < timeout:
+        # First preference: plan explicitly referenced by the subscription.
+        ref_name = _get_subscription_install_plan_ref(oc, namespace, subscription_name)
+
         r = oc.oc("get", "installplan", "-n", namespace, "-o", "json", timeout=15)
         if r.returncode == 0 and r.stdout:
             try:
                 items = json.loads(r.stdout).get("items", [])
             except json.JSONDecodeError:
                 items = []
-            # Prefer a plan that matches csv_name exactly; fall back to any unapproved plan.
-            exact_match = next(
-                (ip for ip in items
-                 if csv_name in ((ip.get("spec") or {}).get("clusterServiceVersionNames") or [])
-                 and not (ip.get("spec") or {}).get("approved", False)),
-                None,
-            )
-            fallback = next(
-                (ip for ip in items if not (ip.get("spec") or {}).get("approved", False)),
-                None,
-            ) if exact_match is None else None
-            to_approve = exact_match or fallback
+
+            to_approve = None
+            if ref_name:
+                # Use the subscription's current InstallPlan reference.
+                to_approve = next(
+                    (ip for ip in items
+                     if ip["metadata"]["name"] == ref_name
+                     and not (ip.get("spec") or {}).get("approved", False)),
+                    None,
+                )
+            if to_approve is None:
+                # Fall back to an exact CSV-name match (ref not yet set by OLM).
+                to_approve = next(
+                    (ip for ip in items
+                     if csv_name in ((ip.get("spec") or {}).get("clusterServiceVersionNames") or [])
+                     and not (ip.get("spec") or {}).get("approved", False)),
+                    None,
+                )
+
             if to_approve is not None:
                 ip_name = to_approve["metadata"]["name"]
                 csvs = (to_approve.get("spec") or {}).get("clusterServiceVersionNames") or []
@@ -133,13 +158,12 @@ def _approve_any_pending_install_plan(
                 if patch_r.returncode == 0:
                     return
                 print(f"  Patch failed: {patch_r.stderr or patch_r.stdout}, retrying...")
+
+            # All existing plans are already approved — OLM auto-approved or previous run did it.
+            if items and all((ip.get("spec") or {}).get("approved", False) for ip in items):
+                return
+
         time.sleep(10)
-    # If all plans are already approved (OLM auto-approved), that is also fine.
-    r = oc.oc("get", "installplan", "-n", namespace, "-o", "json", timeout=15)
-    if r.returncode == 0 and r.stdout:
-        items = json.loads(r.stdout or "{}").get("items", [])
-        if all((ip.get("spec") or {}).get("approved", False) for ip in items if items):
-            return
     raise OperatorError(f"Timeout ({timeout}s) waiting to approve InstallPlan in {namespace}")
 
 
@@ -480,8 +504,13 @@ def install_all_operators(
     oc: OcRunner,
     gpu_operator_version: str,
     timeout_per_operator: int = 600,
+    enable_driver: bool = True,
 ) -> None:
-    """Install NFD, then KMM, then AMD GPU Operator (order per doc)."""
+    """Install NFD, then optionally KMM, then AMD GPU Operator (order per doc).
+
+    KMM is skipped when enable_driver=False (in-tree amdgpu driver path).
+    """
     install_nfd(oc, timeout=timeout_per_operator)
-    install_kmm(oc, timeout=timeout_per_operator)
+    if enable_driver:
+        install_kmm(oc, timeout=timeout_per_operator)
     install_amd_gpu_operator(oc, gpu_operator_version=gpu_operator_version, timeout=timeout_per_operator)
