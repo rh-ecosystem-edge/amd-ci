@@ -32,6 +32,10 @@ NFD_LABEL_VALUE = "true"
 # ---------------------------------------------------------------------------
 DEVICE_PLUGIN_PREFIX = f"{DEVICECONFIG_NAME}-device-plugin-"
 NODE_LABELLER_PREFIX = f"{DEVICECONFIG_NAME}-node-labeller-"
+METRICS_EXPORTER_PREFIX = os.environ.get(
+    "AMD_METRICS_EXPORTER_PREFIX",
+    f"{DEVICECONFIG_NAME}-metrics-exporter-",
+)
 
 # ---------------------------------------------------------------------------
 # ROCm test image
@@ -74,11 +78,6 @@ DEVICE_IDS: dict[str, str] = {
     "738c": "MI100",
     "738e": "MI100",
 }
-
-# ---------------------------------------------------------------------------
-# Metrics exporter
-# ---------------------------------------------------------------------------
-METRICS_EXPORTER_PREFIX = f"{DEVICECONFIG_NAME}-metrics-exporter-"
 
 # Core Prometheus metric names expected in the /metrics response.
 # These correspond to the amd_ prefixed fields from the device-metrics-exporter.

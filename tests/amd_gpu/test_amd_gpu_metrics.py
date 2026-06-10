@@ -11,6 +11,7 @@ Prerequisites (in addition to those in test_amd_gpu_basic.py):
 from __future__ import annotations
 
 import logging
+import time
 
 import pytest
 from kubernetes import client
@@ -112,16 +113,36 @@ class TestMetricsExporter:
         port = svc.spec.ports[0].port if svc.spec.ports else None
         proxy_name = f"{svc_name}:{port}" if port else svc_name
 
-        try:
-            body = k8s_core_api.connect_get_namespaced_service_proxy_with_path(
-                name=proxy_name,
-                namespace=NAMESPACE_AMD_GPU,
-                path="metrics",
-            )
-        except ApiException as exc:
+        # Retry for up to 60s — the pod may just have started (Running phase
+        # doesn't mean the HTTP server inside is accepting connections yet).
+        deadline = time.monotonic() + 60
+        body = None
+        last_exc: ApiException | None = None
+        while time.monotonic() < deadline:
+            try:
+                body = k8s_core_api.connect_get_namespaced_service_proxy_with_path(
+                    name=proxy_name,
+                    namespace=NAMESPACE_AMD_GPU,
+                    path="metrics",
+                )
+                break
+            except ApiException as exc:
+                if exc.status == 503:
+                    last_exc = exc
+                    logger.debug(
+                        "Metrics endpoint not ready yet (503); retrying in 5s"
+                    )
+                    time.sleep(5)
+                else:
+                    pytest.fail(
+                        f"Failed to reach /metrics on service '{svc_name}': "
+                        f"HTTP {exc.status} — {exc.reason}"
+                    )
+
+        if body is None:
             pytest.fail(
-                f"Failed to reach /metrics on service '{svc_name}': "
-                f"HTTP {exc.status} — {exc.reason}"
+                f"Metrics endpoint on '{svc_name}' still returning 503 after 60s: "
+                f"{last_exc.reason if last_exc else 'unknown'}"
             )
 
         assert body, f"Empty response from '{svc_name}/metrics'"
