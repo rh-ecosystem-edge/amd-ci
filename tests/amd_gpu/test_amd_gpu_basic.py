@@ -413,16 +413,6 @@ class TestComponentCleanup:
             wait_for_pods_gone(k8s_core_api, NAMESPACE_AMD_GPU, NODE_LABELLER_PREFIX)
             logger.info("Node labeller pods are gone")
 
-            pods = k8s_core_api.list_namespaced_pod(NAMESPACE_AMD_GPU).items
-            remaining = [
-                p.metadata.name
-                for p in pods
-                if p.metadata.name.startswith(NODE_LABELLER_PREFIX)
-            ]
-            assert not remaining, (
-                f"Node labeller pods still present after disabling: {remaining}"
-            )
-
             # GPU metadata labels must be removed from all AMD GPU nodes.
             node_names = {n.metadata.name for n in amd_gpu_nodes}
             deadline = time.monotonic() + _LABEL_ABSENT_TIMEOUT

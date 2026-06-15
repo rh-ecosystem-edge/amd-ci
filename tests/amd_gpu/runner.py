@@ -17,8 +17,6 @@ from urllib.parse import urlparse
 
 import yaml
 
-from shared.ssh import SSH_BASE_OPTS
-
 # Stripped-down SSH opts for the tunnel process — no ControlMaster/ControlPersist
 # so the Popen'd process stays in the foreground and can be kill()'d on cleanup.
 _TUNNEL_SSH_OPTS = (
@@ -97,10 +95,6 @@ def run_gpu_tests_remote(
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         local_port = s.getsockname()[1]
-
-    ssh_opts = SSH_BASE_OPTS
-    if ssh_key_path:
-        ssh_opts += f" -i {ssh_key_path}"
 
     tunnel_opts = _TUNNEL_SSH_OPTS
     if ssh_key_path:
