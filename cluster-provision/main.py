@@ -30,6 +30,7 @@ from config import (
     print_config,
 )
 from params import update_version_to_latest_patch
+from common import DeployError
 from deploy import deploy_cluster
 from delete import delete_cluster
 
@@ -102,21 +103,43 @@ def main(argv: list[str] | None = None) -> int:
             print(f"PCI Passthrough Devices: {config.pci_devices}")
         print(f"Config file: {args.config_file}")
         
-        deploy_cluster(
-            params=params,
-            remote_host=config.remote.host,
-            pci_devices=config.pci_devices,
-            remote_user=config.remote.user,
-            wait_timeout=config.wait_timeout,
-            ssh_key=config.remote.ssh_key_path,
-        )
+        try:
+            actual_version = deploy_cluster(
+                params=params,
+                remote_host=config.remote.host,
+                pci_devices=config.pci_devices,
+                remote_user=config.remote.user,
+                wait_timeout=config.wait_timeout,
+                ssh_key=config.remote.ssh_key_path,
+            )
+        except DeployError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+
+        # Verify kcli deployed the version we requested (not a silent fallback)
+        if not actual_version:
+            print(
+                "Error: failed to query deployed OCP version from cluster. "
+                "The cluster may not be fully ready.",
+                file=sys.stderr,
+            )
+            return 1
+
+        if actual_version != ocp_version:
+            print(
+                f"Error: version mismatch — requested {ocp_version} but cluster "
+                f"deployed {actual_version}. The requested version may not be "
+                f"available in the {config.version_channel} channel yet.",
+                file=sys.stderr,
+            )
+            return 1
 
         artifact_dir = os.environ.get("ARTIFACT_DIR")
         if artifact_dir:
             artifact_path = Path(artifact_dir)
             artifact_path.mkdir(parents=True, exist_ok=True)
-            (artifact_path / "ocp.version").write_text(ocp_version)
-            print(f"Wrote ocp.version: {ocp_version}")
+            (artifact_path / "ocp.version").write_text(actual_version)
+            print(f"Wrote ocp.version: {actual_version}")
         
     elif command == "delete":
         params = {"cluster": config.cluster_name}
