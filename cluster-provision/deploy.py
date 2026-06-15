@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, List, Optional
 from common import DeployError, run
 from config import get_cluster_topology_description
 from kcli_preflight import ensure_kcli_installed, ensure_pull_secret_exists, ensure_kcli_config
+from shared.oc_runner import OcRunner, LocalOcRunner, RemoteOcRunner, REMOTE_KUBECONFIG
 
 
 def push_ssh_key_to_remote(host: str, user: str) -> None:
@@ -132,7 +133,7 @@ def deploy_cluster(
     wait_timeout: int,
     ssh_key: Optional[str],
     pci_devices: Optional[List[str]],
-) -> None:
+) -> str:
     """
     Main deployment flow, driven by the kcli parameters.
 
@@ -147,6 +148,9 @@ def deploy_cluster(
         wait_timeout: Timeout in seconds for cluster ready (remote only)
         ssh_key: Path to SSH private key file (optional)
         pci_devices: List of PCI device addresses for passthrough (e.g., ["0000:b3:00.0"])
+
+    Returns:
+        The actual deployed OCP version string (e.g. "4.22.1").
     """
     ensure_kcli_installed()
     
@@ -171,7 +175,7 @@ def deploy_cluster(
 
     # Handle remote vs local deployment
     if remote_host:
-        deploy_remote(
+        return deploy_remote(
             params=params,
             cluster_name=cluster_name,
             api_ip=api_ip,
@@ -185,19 +189,39 @@ def deploy_cluster(
             pci_devices=pci_devices,
         )
     else:
-        deploy_local(
+        return deploy_local(
             params=params,
             ctlplanes=ctlplanes,
             workers=workers,
         )
 
 
+def get_deployed_cluster_version(oc: OcRunner) -> str:
+    """Query the actual OCP version running on the cluster.
+
+    Works with both LocalOcRunner and RemoteOcRunner.
+    Returns the version string (e.g. "4.22.1") or empty string on failure.
+    """
+    result = oc.oc("get", "clusterversion", "version", "--no-headers", timeout=30)
+    if result.returncode != 0 or not result.stdout:
+        print(f"  Warning: failed to query cluster version (rc={result.returncode})")
+        return ""
+    # Output format: NAME VERSION AVAILABLE PROGRESSING SINCE STATUS
+    parts = result.stdout.strip().split()
+    if len(parts) >= 2:
+        return parts[1]
+    return ""
+
+
 def deploy_local(
     params: Dict[str, Any],
     ctlplanes: int,
     workers: int,
-) -> None:
-    """Deploy OpenShift cluster locally using kcli."""
+) -> str:
+    """Deploy OpenShift cluster locally using kcli.
+
+    Returns the actual deployed OCP version (e.g. "4.22.1").
+    """
     ensure_kcli_config()
 
     topology = get_cluster_topology_description(ctlplanes, workers)
@@ -209,8 +233,13 @@ def deploy_local(
     print(f"\nStarting OpenShift deployment [{topology}] with kcli...")
     print(f"  kcli command: {' '.join(kcli_cmd)}")
     run(kcli_cmd, check=True)
-    print(f"\nOpenShift deployment [{topology}] command has completed.")
-    print("Check 'kcli list' and the OpenShift console once the cluster is fully up.")
+
+    cluster_name = params["cluster"]
+    kubeconfig = Path.home() / ".kcli" / "clusters" / cluster_name / "auth" / "kubeconfig"
+    oc = LocalOcRunner(str(kubeconfig))
+    actual_version = get_deployed_cluster_version(oc)
+    print(f"\nOpenShift deployment [{topology}] command has completed. (version: {actual_version})")
+    return actual_version
 
 
 def deploy_remote(
@@ -225,8 +254,11 @@ def deploy_remote(
     wait_timeout: int,
     ssh_key: Optional[str] = None,
     pci_devices: Optional[List[str]] = None,
-) -> None:
-    """Deploy OpenShift cluster on a remote libvirt host."""
+) -> str:
+    """Deploy OpenShift cluster on a remote libvirt host.
+
+    Returns the actual deployed OCP version (e.g. "4.22.1").
+    """
     from remote import (
         setup_remote_libvirt,
         configure_kcli_remote_client,
@@ -382,4 +414,7 @@ def deploy_remote(
         kcli_client=kcli_client,
     )
 
-    print("\nDeployment completed successfully!")
+    oc = RemoteOcRunner(remote_host, remote_user, REMOTE_KUBECONFIG)
+    actual_version = get_deployed_cluster_version(oc)
+    print(f"\nDeployment completed successfully! (version: {actual_version})")
+    return actual_version
