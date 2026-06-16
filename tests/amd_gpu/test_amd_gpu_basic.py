@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 
 import pytest
 from kubernetes.client.rest import ApiException
@@ -30,6 +31,7 @@ from tests.amd_gpu.constants import (
     DEVICECONFIG_PLURAL,
     DEVICECONFIG_VERSION,
     GPU_RESOURCE_NAME,
+    METRICS_EXPORTER_PREFIX,
     NAMESPACE_AMD_GPU,
     NAMESPACE_IMAGE_REGISTRY,
     NFD_LABEL_KEY,
@@ -37,7 +39,12 @@ from tests.amd_gpu.constants import (
     NODE_LABELLER_LABELS,
     NODE_LABELLER_PREFIX,
 )
-from tests.amd_gpu.helpers import run_gpu_command
+from tests.amd_gpu.helpers import (
+    patch_device_config,
+    run_gpu_command,
+    wait_for_pods_gone,
+    wait_for_pods_running_by_prefix,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -166,46 +173,66 @@ class TestNodeLabeller:
     """Verify Node Labeller pods and GPU metadata labels."""
 
     def test_node_labeller_pods_running(self, k8s_core_api):
-        """At least one Node Labeller pod must be Running."""
+        """At least one Node Labeller pod must be Running.
+
+        Waits up to 3 minutes — the labeller DaemonSet may still be
+        scheduling when the test suite starts.
+        """
+        wait_for_pods_running_by_prefix(
+            k8s_core_api, NAMESPACE_AMD_GPU, NODE_LABELLER_PREFIX,
+            min_count=1, timeout=180,
+        )
         pods = k8s_core_api.list_namespaced_pod(NAMESPACE_AMD_GPU)
         labeller_pods = [
             p
             for p in pods.items
             if p.metadata.name.startswith(NODE_LABELLER_PREFIX)
         ]
-
-        assert labeller_pods, (
-            f"No Node Labeller pods found with prefix '{NODE_LABELLER_PREFIX}' "
-            f"in namespace '{NAMESPACE_AMD_GPU}'"
-        )
-
         for pod in labeller_pods:
             assert pod.status.phase == "Running", (
                 f"Node Labeller pod {pod.metadata.name} has phase "
                 f"'{pod.status.phase}', expected 'Running'"
             )
-            logger.info(
-                "Node Labeller pod %s is Running", pod.metadata.name
-            )
+            logger.info("Node Labeller pod %s is Running", pod.metadata.name)
 
     def test_gpu_metadata_labels_applied(self, k8s_core_api):
         """All expected GPU metadata labels must be present on every AMD
         GPU node, and the device-id value must be a known AMD GPU.
+
+        Polls up to 3 minutes because the node-labeller applies labels
+        asynchronously after its pod reaches Running.
         """
+        _LABEL_PRESENT_TIMEOUT = 180
+        _LABEL_PRESENT_POLL = 5
+
+        deadline = time.monotonic() + _LABEL_PRESENT_TIMEOUT
+        missing_per_node: dict[str, list[str]] = {}
+        while time.monotonic() < deadline:
+            nodes = k8s_core_api.list_node(
+                label_selector=f"{NFD_LABEL_KEY}={NFD_LABEL_VALUE}",
+            )
+            assert nodes.items, "No AMD GPU nodes found when checking labels"
+            missing_per_node = {}
+            for node in nodes.items:
+                labels = node.metadata.labels or {}
+                missing = [lbl for lbl in NODE_LABELLER_LABELS if lbl not in labels]
+                if missing:
+                    missing_per_node[node.metadata.name] = missing
+            if not missing_per_node:
+                break
+            logger.debug("Waiting for GPU labels: %s", missing_per_node)
+            time.sleep(_LABEL_PRESENT_POLL)
+
+        assert not missing_per_node, (
+            f"GPU metadata labels not applied within {_LABEL_PRESENT_TIMEOUT}s. "
+            f"Missing labels per node: {missing_per_node}"
+        )
+
         nodes = k8s_core_api.list_node(
             label_selector=f"{NFD_LABEL_KEY}={NFD_LABEL_VALUE}",
         )
-        assert nodes.items, "No AMD GPU nodes found when checking labels"
-
         for node in nodes.items:
             labels = node.metadata.labels or {}
-            missing = [
-                lbl for lbl in NODE_LABELLER_LABELS if lbl not in labels
-            ]
-            assert not missing, (
-                f"Node {node.metadata.name} is missing GPU labels: {missing}"
-            )
-
             device_id = labels.get("amd.com/gpu.device-id", "")
             assert device_id, (
                 f"Node {node.metadata.name}: label 'amd.com/gpu.device-id' "
@@ -343,3 +370,246 @@ class TestROCmValidation:
         assert "AMD" in output, (
             "Expected 'AMD' vendor string in rocminfo output"
         )
+
+
+# ============================================================================
+# Component Cleanup (disable → verify cleanup → restore)
+# ============================================================================
+
+_LABEL_POLL_INTERVAL = 5
+_LABEL_ABSENT_TIMEOUT = 120
+
+
+class TestComponentCleanup:
+    """Verify that disabling a DeviceConfig component removes its pods and
+    associated resources, then restore the original configuration.
+
+    Each test disables a component, asserts the cleanup, and re-enables it
+    inside a ``try/finally`` so the cluster is left healthy even on failure.
+    """
+
+    def test_node_labeller_disable(
+        self, k8s_core_api, k8s_custom_api, amd_gpu_nodes
+    ):
+        """Disabling ``enableNodeLabeller`` must remove labeller pods and
+        GPU metadata labels from all AMD GPU nodes.
+        """
+        dc = k8s_custom_api.get_namespaced_custom_object(
+            DEVICECONFIG_GROUP, DEVICECONFIG_VERSION,
+            NAMESPACE_AMD_GPU, DEVICECONFIG_PLURAL, DEVICECONFIG_NAME,
+        )
+        original_enable_node_labeller = (
+            ((dc.get("spec") or {}).get("devicePlugin") or {}).get("enableNodeLabeller", True)
+        )
+
+        patch_device_config(
+            k8s_custom_api,
+            {"spec": {"devicePlugin": {"enableNodeLabeller": False}}},
+        )
+        logger.info("Disabled node labeller in DeviceConfig")
+
+        try:
+            # Pods must terminate.
+            wait_for_pods_gone(k8s_core_api, NAMESPACE_AMD_GPU, NODE_LABELLER_PREFIX)
+            logger.info("Node labeller pods are gone")
+
+            # GPU metadata labels must be removed from all AMD GPU nodes.
+            node_names = {n.metadata.name for n in amd_gpu_nodes}
+            deadline = time.monotonic() + _LABEL_ABSENT_TIMEOUT
+            violations: dict[str, list[str]] = {}
+            while time.monotonic() < deadline:
+                violations = {}
+                for node in k8s_core_api.list_node().items:
+                    if node.metadata.name not in node_names:
+                        continue
+                    labels = node.metadata.labels or {}
+                    still_present = [
+                        lbl for lbl in NODE_LABELLER_LABELS if lbl in labels
+                    ]
+                    if still_present:
+                        violations[node.metadata.name] = still_present
+                if not violations:
+                    break
+                logger.debug("Waiting for GPU labels to be removed: %s", violations)
+                time.sleep(_LABEL_POLL_INTERVAL)
+
+            assert not violations, (
+                f"GPU labels still present on nodes after disabling node labeller "
+                f"(waited {_LABEL_ABSENT_TIMEOUT}s): {violations}"
+            )
+            logger.info("GPU metadata labels removed from all AMD GPU nodes")
+
+        finally:
+            patch_device_config(
+                k8s_custom_api,
+                {"spec": {"devicePlugin": {"enableNodeLabeller": original_enable_node_labeller}}},
+            )
+            logger.info("Restored node labeller to original value (%s); waiting for pods to come back",
+                        original_enable_node_labeller)
+            if original_enable_node_labeller:
+                wait_for_pods_running_by_prefix(
+                    k8s_core_api, NAMESPACE_AMD_GPU, NODE_LABELLER_PREFIX,
+                    min_count=len(amd_gpu_nodes),
+                )
+                # Also wait for GPU metadata labels to reappear — pods Running
+                # is not enough; label application is asynchronous.
+                _LABEL_RESTORE_TIMEOUT = 120
+                node_names = {n.metadata.name for n in amd_gpu_nodes}
+                deadline = time.monotonic() + _LABEL_RESTORE_TIMEOUT
+                while time.monotonic() < deadline:
+                    missing_labels: dict[str, list[str]] = {}
+                    for node in k8s_core_api.list_node().items:
+                        if node.metadata.name not in node_names:
+                            continue
+                        labels = node.metadata.labels or {}
+                        absent = [lbl for lbl in NODE_LABELLER_LABELS if lbl not in labels]
+                        if absent:
+                            missing_labels[node.metadata.name] = absent
+                    if not missing_labels:
+                        logger.info("GPU metadata labels restored on all nodes")
+                        break
+                    logger.debug("Waiting for GPU labels to return: %s", missing_labels)
+                    time.sleep(_LABEL_POLL_INTERVAL)
+                else:
+                    logger.warning("GPU metadata labels not fully restored after %ss: %s",
+                                   _LABEL_RESTORE_TIMEOUT, missing_labels)
+
+    def test_metrics_exporter_disable(self, k8s_core_api, k8s_custom_api, amd_gpu_nodes):
+        """Disabling ``metricsExporter`` must remove its pods, Service, and
+        ServiceMonitor (when Prometheus CRDs are installed).
+        """
+        dc = k8s_custom_api.get_namespaced_custom_object(
+            DEVICECONFIG_GROUP, DEVICECONFIG_VERSION,
+            NAMESPACE_AMD_GPU, DEVICECONFIG_PLURAL, DEVICECONFIG_NAME,
+        )
+        original_enable_metrics = (
+            ((dc.get("spec") or {}).get("metricsExporter") or {}).get("enable", True)
+        )
+
+        patch_device_config(
+            k8s_custom_api,
+            {"spec": {"metricsExporter": {"enable": False}}},
+        )
+        logger.info("Disabled metrics exporter in DeviceConfig")
+
+        # Derive the expected service name base from the pod prefix.
+        service_name_base = METRICS_EXPORTER_PREFIX.rstrip("-")
+
+        try:
+            # Pods must terminate.
+            wait_for_pods_gone(
+                k8s_core_api, NAMESPACE_AMD_GPU, METRICS_EXPORTER_PREFIX
+            )
+            logger.info("Metrics exporter pods are gone")
+
+            pods = k8s_core_api.list_namespaced_pod(NAMESPACE_AMD_GPU).items
+            remaining_pods = [
+                p.metadata.name
+                for p in pods
+                if p.metadata.name.startswith(METRICS_EXPORTER_PREFIX)
+            ]
+            assert not remaining_pods, (
+                f"Metrics exporter pods still present after disabling: {remaining_pods}"
+            )
+
+            # Service must be removed (controller-driven, poll with timeout).
+            _RESOURCE_REMOVAL_TIMEOUT = 60
+            _RESOURCE_REMOVAL_POLL = 5
+            svc_deadline = time.monotonic() + _RESOURCE_REMOVAL_TIMEOUT
+            remaining_svcs: list[str] = []
+            while time.monotonic() < svc_deadline:
+                services = k8s_core_api.list_namespaced_service(NAMESPACE_AMD_GPU).items
+                remaining_svcs = [
+                    svc.metadata.name
+                    for svc in services
+                    if svc.metadata.name.startswith(service_name_base)
+                ]
+                if not remaining_svcs:
+                    break
+                logger.debug("Waiting for metrics exporter Service(s) to be removed: %s", remaining_svcs)
+                time.sleep(_RESOURCE_REMOVAL_POLL)
+            assert not remaining_svcs, (
+                f"Metrics exporter Service(s) still present after disabling "
+                f"(waited {_RESOURCE_REMOVAL_TIMEOUT}s): {remaining_svcs}"
+            )
+            logger.info("Metrics exporter Service removed")
+
+            # ServiceMonitor must be removed (controller-driven, poll with timeout;
+            # best-effort: skip if CRD absent).
+            try:
+                sm_deadline = time.monotonic() + _RESOURCE_REMOVAL_TIMEOUT
+                remaining_sm: list[str] = []
+                while time.monotonic() < sm_deadline:
+                    monitors = k8s_custom_api.list_namespaced_custom_object(
+                        "monitoring.coreos.com",
+                        "v1",
+                        NAMESPACE_AMD_GPU,
+                        "servicemonitors",
+                    )
+                    remaining_sm = [
+                        sm["metadata"]["name"]
+                        for sm in (monitors.get("items") or [])
+                        if sm["metadata"]["name"].startswith(service_name_base)
+                    ]
+                    if not remaining_sm:
+                        break
+                    logger.debug("Waiting for ServiceMonitor(s) to be removed: %s", remaining_sm)
+                    time.sleep(_RESOURCE_REMOVAL_POLL)
+                assert not remaining_sm, (
+                    f"ServiceMonitor(s) still present after disabling metrics "
+                    f"exporter (waited {_RESOURCE_REMOVAL_TIMEOUT}s): {remaining_sm}"
+                )
+                logger.info("ServiceMonitor removed")
+            except ApiException as exc:
+                if exc.status == 404:
+                    logger.info(
+                        "ServiceMonitor CRD not present; skipping ServiceMonitor check"
+                    )
+                else:
+                    raise
+
+        finally:
+            patch_device_config(
+                k8s_custom_api,
+                {"spec": {"metricsExporter": {"enable": original_enable_metrics}}},
+            )
+            logger.info("Restored metrics exporter to original value (%s); waiting for pods to come back",
+                        original_enable_metrics)
+            if original_enable_metrics:
+                wait_for_pods_running_by_prefix(
+                    k8s_core_api, NAMESPACE_AMD_GPU, METRICS_EXPORTER_PREFIX,
+                    min_count=len(amd_gpu_nodes),
+                )
+                # Also wait for the Service and ServiceMonitor to be recreated —
+                # both are controller-driven and can lag behind pod readiness.
+                service_name_base = METRICS_EXPORTER_PREFIX.rstrip("-")
+                _RESTORE_TIMEOUT = 60
+                _RESTORE_POLL = 5
+                svc_deadline = time.monotonic() + _RESTORE_TIMEOUT
+                while time.monotonic() < svc_deadline:
+                    svcs = k8s_core_api.list_namespaced_service(NAMESPACE_AMD_GPU).items
+                    if any(s.metadata.name.startswith(service_name_base) for s in svcs):
+                        logger.info("Metrics exporter Service restored")
+                        break
+                    time.sleep(_RESTORE_POLL)
+                else:
+                    logger.warning("Metrics exporter Service not restored after %ss", _RESTORE_TIMEOUT)
+                try:
+                    sm_deadline = time.monotonic() + _RESTORE_TIMEOUT
+                    while time.monotonic() < sm_deadline:
+                        monitors = k8s_custom_api.list_namespaced_custom_object(
+                            "monitoring.coreos.com", "v1", NAMESPACE_AMD_GPU, "servicemonitors",
+                        )
+                        if any(
+                            sm["metadata"]["name"].startswith(service_name_base)
+                            for sm in (monitors.get("items") or [])
+                        ):
+                            logger.info("Metrics exporter ServiceMonitor restored")
+                            break
+                        time.sleep(_RESTORE_POLL)
+                    else:
+                        logger.warning("Metrics exporter ServiceMonitor not restored after %ss",
+                                       _RESTORE_TIMEOUT)
+                except ApiException as exc:
+                    if exc.status != 404:
+                        raise

@@ -17,7 +17,17 @@ from urllib.parse import urlparse
 
 import yaml
 
-from shared.ssh import SSH_BASE_OPTS
+# Stripped-down SSH opts for the tunnel process — no ControlMaster/ControlPersist
+# so the Popen'd process stays in the foreground and can be kill()'d on cleanup.
+_TUNNEL_SSH_OPTS = (
+    "-o StrictHostKeyChecking=no "
+    "-o UserKnownHostsFile=/dev/null "
+    "-o LogLevel=ERROR "
+    "-o ConnectTimeout=30 "
+    "-o ServerAliveInterval=10 "
+    "-o ServerAliveCountMax=3 "
+    "-o BatchMode=yes"
+)
 
 
 def run_gpu_tests(kubeconfig_path: str | Path) -> int:
@@ -86,12 +96,13 @@ def run_gpu_tests_remote(
         s.bind(("127.0.0.1", 0))
         local_port = s.getsockname()[1]
 
-    ssh_opts = SSH_BASE_OPTS
+    tunnel_opts = _TUNNEL_SSH_OPTS
     if ssh_key_path:
-        ssh_opts += f" -i {ssh_key_path}"
+        tunnel_opts += f" -i {ssh_key_path}"
 
     tunnel_cmd = (
-        f"ssh {ssh_opts} -L 127.0.0.1:{local_port}:{api_host}:{api_port} "
+        f"ssh {tunnel_opts} "
+        f"-L 127.0.0.1:{local_port}:{api_host}:{api_port} "
         f"-N {remote_user}@{remote_host}"
     )
     print(f"  Opening SSH tunnel (local :{local_port} -> {api_host}:{api_port} via {remote_host})...")
