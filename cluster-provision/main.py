@@ -240,7 +240,11 @@ def _deploy_with_snapshot(config: ClusterConfig, ocp_version: str) -> None:
     print(f"  Snapshot cache: max {config.snapshot.max_cached} versions")
     print(f"{'='*60}\n")
 
-    setup_remote_libvirt(host, user)
+    setup_remote_libvirt(
+        host, user,
+        libvirt_pool_path=config.remote.libvirt_pool_path,
+        min_free_space_gb=config.remote.min_free_space_gb,
+    )
     kcli_client = configure_kcli_remote_client(host, user)
 
     if find_snapshot(host, user, vm_name, ocp_version):
@@ -283,6 +287,8 @@ def _deploy_with_snapshot(config: ClusterConfig, ocp_version: str) -> None:
             remote_user=user,
             wait_timeout=config.wait_timeout,
             ssh_key=config.remote.ssh_key_path,
+            libvirt_pool_path=config.remote.libvirt_pool_path,
+            min_free_space_gb=config.remote.min_free_space_gb,
         )
 
         print("\nInstalling base operators for snapshot...")
@@ -368,6 +374,8 @@ def cmd_deploy(config: ClusterConfig, config_file: str) -> int:
             remote_user=config.remote.user,
             wait_timeout=config.wait_timeout,
             ssh_key=config.remote.ssh_key_path,
+            libvirt_pool_path=config.remote.libvirt_pool_path,
+            min_free_space_gb=config.remote.min_free_space_gb,
         )
 
         if actual_version and actual_version != ocp_version:

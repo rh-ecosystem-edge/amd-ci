@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from common import DeployError, run
-from config import get_cluster_topology_description
+from config import DEFAULT_MIN_FREE_SPACE_GB, get_cluster_topology_description
 from kcli_preflight import ensure_kcli_installed, ensure_pull_secret_exists, ensure_kcli_config
 from shared.oc_runner import OcRunner, LocalOcRunner, RemoteOcRunner, REMOTE_KUBECONFIG
 from vm import shutdown_vms, start_vms, fix_container_storage, attach_pci_devices, destroy_vm
@@ -60,6 +60,8 @@ def deploy_cluster(
     wait_timeout: int,
     ssh_key: Optional[str],
     pci_devices: Optional[List[str]],
+    libvirt_pool_path: Optional[str] = None,
+    min_free_space_gb: float = DEFAULT_MIN_FREE_SPACE_GB,
 ) -> str:
     """
     Main deployment flow, driven by the kcli parameters.
@@ -75,6 +77,9 @@ def deploy_cluster(
         wait_timeout: Timeout in seconds for cluster ready (remote only)
         ssh_key: Path to SSH private key file (optional)
         pci_devices: List of PCI device addresses for passthrough (e.g., ["0000:b3:00.0"])
+        libvirt_pool_path: Optional explicit override for the libvirt default storage
+            pool directory. Leave unset to auto-select the mount with the most free space.
+        min_free_space_gb: Minimum free space (GB) required for a storage location
 
     Returns:
         The actual deployed OCP version string (e.g. "4.22.1").
@@ -114,6 +119,8 @@ def deploy_cluster(
             wait_timeout=wait_timeout,
             ssh_key=ssh_key,
             pci_devices=pci_devices,
+            libvirt_pool_path=libvirt_pool_path,
+            min_free_space_gb=min_free_space_gb,
         )
     else:
         return deploy_local(
@@ -206,6 +213,8 @@ def deploy_remote(
     wait_timeout: int,
     ssh_key: Optional[str] = None,
     pci_devices: Optional[List[str]] = None,
+    libvirt_pool_path: Optional[str] = None,
+    min_free_space_gb: float = DEFAULT_MIN_FREE_SPACE_GB,
 ) -> str:
     """Deploy OpenShift cluster on a remote libvirt host.
 
@@ -243,7 +252,11 @@ def deploy_remote(
 
     # Step 1: Setup remote host (idempotent)
     print("Step 1: Setting up remote host...")
-    setup_remote_libvirt(remote_host, remote_user)
+    setup_remote_libvirt(
+        remote_host, remote_user,
+        libvirt_pool_path=libvirt_pool_path,
+        min_free_space_gb=min_free_space_gb,
+    )
 
     # Step 1b: Ensure PCI passthrough is enabled on the host (may reboot)
     if pci_devices:

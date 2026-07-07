@@ -7,6 +7,7 @@ All values must be provided in the YAML config file unless noted as optional.
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,6 +18,28 @@ import yaml
 VERSION_CHANNEL = "stable"
 
 
+DEFAULT_MIN_FREE_SPACE_GB = 100
+
+
+def _parse_min_free_space_gb(raw_value: Any) -> float:
+    """Parse and validate the remote.min_free_space_gb config value.
+
+    Falls back to the default only when the key is absent (None), so an
+    explicit 0 is preserved rather than being treated as falsy.
+    """
+    if raw_value is None:
+        return DEFAULT_MIN_FREE_SPACE_GB
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        raise ValueError(f"remote.min_free_space_gb must be a number, got: {raw_value!r}") from None
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(
+            f"remote.min_free_space_gb must be a finite, non-negative number, got: {raw_value!r}"
+        )
+    return value
+
+
 @dataclass
 class RemoteConfig:
     """Remote deployment configuration."""
@@ -24,6 +47,14 @@ class RemoteConfig:
     host: str | None
     user: str
     ssh_key_path: str | None
+    # Explicit override for the libvirt storage pool directory. Leave unset
+    # (None) to auto-select whichever real mount point has the most free
+    # space, adapting automatically to any machine's partition layout.
+    libvirt_pool_path: str | None = None
+    # Minimum free space (GB) required for a storage location to be
+    # considered acceptable (used both to judge candidate mounts and to
+    # decide whether an already-configured pool location is still good).
+    min_free_space_gb: float = DEFAULT_MIN_FREE_SPACE_GB
 
 
 @dataclass
@@ -203,6 +234,8 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
             host=remote_data.get("host"),
             user=remote_data["user"],
             ssh_key_path=_expand_path(remote_data.get("ssh_key_path")),
+            libvirt_pool_path=remote_data.get("libvirt_pool_path") or None,
+            min_free_space_gb=_parse_min_free_space_gb(remote_data.get("min_free_space_gb")),
         )
 
         ctlplane_data = raw_config["ctlplane"]

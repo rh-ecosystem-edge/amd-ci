@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import subprocess
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 from common import DeployError, run
+from config import DEFAULT_MIN_FREE_SPACE_GB
 import shared.ssh as _ssh_mod
 from shared.ssh import (
     set_ssh_key_path,
@@ -203,11 +205,110 @@ def ensure_host_pci_passthrough(
     print("  PCI passthrough enabled successfully.")
 
 
-def setup_remote_libvirt(host: str, user: str) -> None:
+# Filesystem types to ignore when looking for a real, persistent mount point
+# to place the libvirt storage pool on.
+_NON_STORAGE_FS_TYPES = (
+    "tmpfs", "devtmpfs", "squashfs", "overlay", "iso9660",
+    "proc", "sysfs", "devpts", "cgroup", "cgroup2", "autofs",
+    "mqueue", "tracefs", "debugfs", "hugetlbfs", "pstore", "bpf",
+    "configfs", "securityfs",
+)
+
+
+def _get_free_space_gb(host: str, user: str, path: str) -> float:
+    """Return the free space (in GB) on the filesystem containing `path`."""
+    result = ssh_cmd(host, user, f"df -B1 --output=avail {shlex.quote(path)} 2>/dev/null", check=False)
+    if result.returncode != 0:
+        return 0.0
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return 0.0
+    try:
+        return int(lines[1]) / (1024 ** 3)
+    except ValueError:
+        return 0.0
+
+
+def select_storage_mount(host: str, user: str, min_required_gb: float) -> str:
+    """
+    Inspect the real mounted filesystems on the remote host and return the
+    directory to use as the base for the libvirt default storage pool.
+
+    Picks whichever real mount point currently has the most free space and
+    targets a "libvirt/images" subdirectory under it (or the plain default,
+    /var/lib/libvirt/images, if root itself happens to be the winner). This
+    makes pool placement adapt automatically to any machine's partition
+    layout, without needing to know it in advance.
+
+    Always picks the objectively largest candidate rather than settling for
+    "good enough" on root: since the pool is never auto-migrated later (see
+    MGMT-23421), this initial placement is effectively permanent, so it's
+    worth maximizing the runway rather than risking hitting the limit sooner
+    on a smaller partition that merely cleared the minimum.
+    """
+    exclude_args = " ".join(f"-x {fstype}" for fstype in _NON_STORAGE_FS_TYPES)
+    df_result = ssh_cmd(
+        host, user,
+        f"df -B1 --output=target,avail,fstype {exclude_args} 2>/dev/null",
+        check=False
+    )
+    if df_result.returncode != 0 or not df_result.stdout.strip():
+        raise DeployError(f"Failed to inspect disk space on {host}: {df_result.stderr}")
+
+    candidates: list[tuple[str, float]] = []
+    for line in df_result.stdout.splitlines()[1:]:  # skip header
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        mount_point, avail_bytes = parts[0], parts[1]
+        try:
+            avail_gb = int(avail_bytes) / (1024 ** 3)
+        except ValueError:
+            continue
+        candidates.append((mount_point, avail_gb))
+
+    if not candidates:
+        raise DeployError(f"No usable mount points found on {host} to place the storage pool.")
+
+    best_mount, best_avail_gb = max(candidates, key=lambda item: item[1])
+    if best_avail_gb < min_required_gb:
+        raise DeployError(
+            f"No storage location on {host} has the required "
+            f"{min_required_gb}GB free; best candidate has {best_avail_gb:.0f}GB."
+        )
+
+    if best_mount == "/":
+        print(f"  Root partition has the most free space ({best_avail_gb:.0f}GB); using default location.")
+        return "/var/lib/libvirt/images"
+
+    target_path = f"{best_mount.rstrip('/')}/libvirt/images"
+    print(f"  Selected {best_mount} as storage location ({best_avail_gb:.0f}GB free).")
+    return target_path
+
+
+def setup_remote_libvirt(
+    host: str,
+    user: str,
+    libvirt_pool_path: Optional[str] = None,
+    min_free_space_gb: float = DEFAULT_MIN_FREE_SPACE_GB,
+) -> None:
     """
     Set up libvirt and prerequisites on the remote host.
     This is idempotent - safe to run multiple times.
-    
+
+    Args:
+        host: Remote host address
+        user: SSH user
+        libvirt_pool_path: Explicit target directory for the libvirt default
+            storage pool. If not provided (None), the location is chosen
+            automatically: whichever real mount point has the most free
+            space (falling back to the default /var/lib/libvirt/images on
+            root if root itself has enough room or the most space overall).
+        min_free_space_gb: Minimum free space (GB) required. Used both to
+            decide whether root itself is good enough, and to decide
+            whether an already-configured pool location still has enough
+            room (avoiding unnecessary relocation on every run).
+
     Reference: https://kcli.readthedocs.io/en/latest/#prerequisites
     """
     print(f"Setting up remote host: {user}@{host}")
@@ -275,30 +376,152 @@ def setup_remote_libvirt(host: str, user: str) -> None:
         check=False
     )
     
-    # Create default storage pool if it doesn't exist
-    print("  Checking/creating default storage pool...")
+    # Determine the storage pool's target directory and whether it needs
+    # to be (re)defined.
+    #
+    # Deliberately simple by design (see MGMT-23421): we never move
+    # existing volumes between locations. An earlier version of this
+    # function did attempt that (to auto-recover when a pool's partition
+    # filled up), but relocating files out from under libvirt turned out to
+    # require also fixing qcow2 backing-file pointers and snapshot metadata
+    # that live independently of the moved files -- real bugs that were
+    # easy to introduce and easy to miss. The trade-off here is a hard
+    # failure instead of automatic migration: if the pool already holds
+    # volumes and there isn't enough room, we ask the operator to free up
+    # space (or move things themselves) rather than risk silently
+    # corrupting libvirt state.
+    needs_define = False
+    current_path: Optional[str] = None
+    pool_is_empty = True
+
     pool_check = ssh_cmd(host, user, "virsh -c qemu:///system pool-info default", check=False)
-    if pool_check.returncode != 0:
-        # Pool doesn't exist, create it
-        ssh_cmd(host, user, "mkdir -p /var/lib/libvirt/images")
-        # Try to define the pool, but ignore error if already defined
+    pool_exists = pool_check.returncode == 0
+
+    if pool_exists:
+        dumpxml = ssh_cmd(host, user, "virsh -c qemu:///system pool-dumpxml default", check=False)
+        if dumpxml.returncode != 0:
+            raise DeployError(
+                f"Failed to inspect existing storage pool: {dumpxml.stderr}"
+            )
+        current_match = re.search(r"<path>(.*?)</path>", dumpxml.stdout)
+        current_path = current_match.group(1).rstrip("/") if current_match else None
+
+        if current_path:
+            find_result = ssh_cmd(
+                host, user,
+                f"find {shlex.quote(current_path)} -mindepth 1 -maxdepth 1 2>/dev/null",
+                check=False,
+            )
+            pool_is_empty = not any(line.strip() for line in find_result.stdout.splitlines())
+
+    if libvirt_pool_path:
+        desired_path = libvirt_pool_path.rstrip("/")
+    elif not pool_exists or pool_is_empty:
+        # Nothing to preserve, so it's safe to automatically pick whichever
+        # mount currently has the most free space.
+        desired_path = select_storage_mount(host, user, min_free_space_gb)
+    elif (free_gb := _get_free_space_gb(host, user, current_path)) >= min_free_space_gb:
+        print(f"  Current storage location {current_path} still has sufficient free space, keeping it.")
+        desired_path = current_path
+    else:
+        raise DeployError(
+            f"Storage pool at {current_path} only has {free_gb:.0f}GB free "
+            f"(need {min_free_space_gb:.0f}GB) and already holds existing "
+            "volumes. Automatic relocation between partitions is not "
+            "supported -- free up space (e.g. `make cluster-delete` old "
+            "clusters) or move the pool yourself, then re-run."
+        )
+
+    print(f"  Configuring default storage pool at {desired_path}...")
+
+    if not pool_exists:
+        needs_define = True
+    elif current_path == desired_path:
+        print("  Default storage pool already configured at correct path.")
+    elif not pool_is_empty:
+        # Only reachable via an explicit libvirt_pool_path override that
+        # points somewhere other than a pool that already holds volumes.
+        raise DeployError(
+            f"Storage pool at {current_path} already holds existing volumes, "
+            f"but a different location ({desired_path}) was requested. "
+            "Automatic relocation between partitions is not supported -- "
+            "manually move the pool or clear it, then re-run."
+        )
+    else:
+        # The pool exists but is empty, so there's nothing on disk to
+        # preserve -- just move the pool definition itself.
+        print(f"  Storage pool points to {current_path or 'unknown path'} (empty), redefining at {desired_path}...")
+
+        destroy_result = ssh_cmd(host, user, "virsh -c qemu:///system pool-destroy default", check=False)
+        if destroy_result.returncode != 0 and "not active" not in destroy_result.stderr.lower():
+            raise DeployError(f"Failed to stop existing storage pool: {destroy_result.stderr}")
+
+        undefine_result = ssh_cmd(host, user, "virsh -c qemu:///system pool-undefine default", check=False)
+        if undefine_result.returncode != 0:
+            raise DeployError(f"Failed to undefine existing storage pool: {undefine_result.stderr}")
+
+        needs_define = True
+
+    quoted_desired_path = shlex.quote(desired_path)
+
+    if needs_define:
+        ssh_cmd(host, user, f"mkdir -p {quoted_desired_path}")
         define_result = ssh_cmd(
             host, user,
-            "virsh -c qemu:///system pool-define-as default dir --target /var/lib/libvirt/images",
+            f"virsh -c qemu:///system pool-define-as default dir --target {quoted_desired_path}",
             check=False
         )
-        if define_result.returncode != 0 and "already exists" not in define_result.stderr.lower():
+        if define_result.returncode != 0:
             raise DeployError(f"Failed to define storage pool: {define_result.stderr}")
-        print("  Default storage pool defined.")
+        print(f"  Default storage pool defined at {desired_path}.")
+
+    # Ensure the pool directory carries the SELinux context libvirt/qemu expects.
+    # Individual volumes get dynamically relabeled by libvirt when a VM starts, but
+    # the directory itself (and any pre-existing files moved in above) may still
+    # carry the wrong context (e.g. user_home_t under /home) otherwise. Run this
+    # unconditionally so pre-existing pools with the wrong label also get fixed.
+    semanage_check = ssh_cmd(host, user, "command -v semanage && command -v restorecon", check=False)
+    if semanage_check.returncode == 0:
+        # `semanage fcontext -m` only ever touches *local* customizations --
+        # it can't "modify" a rule that comes from base policy. Paths like
+        # /var/lib/libvirt/images are already virt_image_t out of the box
+        # (no local override exists to add or modify), so unconditionally
+        # trying "-a, falling back to -m" isn't reliable across all
+        # semanage/policycoreutils versions. Check what context the path
+        # would actually resolve to first, and only add a local override
+        # when it's genuinely missing or wrong.
+        matchpathcon_result = ssh_cmd(host, user, f"matchpathcon -n {quoted_desired_path}", check=False)
+        context_parts = matchpathcon_result.stdout.strip().split(":")
+        already_labeled = matchpathcon_result.returncode == 0 and "virt_image_t" in context_parts
+
+        if not already_labeled:
+            fcontext_pattern = shlex.quote(f"{desired_path}(/.*)?")
+            fcontext_result = ssh_cmd(
+                host, user,
+                f"semanage fcontext -a -t virt_image_t {fcontext_pattern} 2>/dev/null || "
+                f"semanage fcontext -m -t virt_image_t {fcontext_pattern}",
+                check=False
+            )
+            if fcontext_result.returncode != 0:
+                raise DeployError(
+                    f"Failed to set SELinux fcontext for {desired_path}: {fcontext_result.stderr}"
+                )
+
+        restorecon_result = ssh_cmd(host, user, f"restorecon -R {quoted_desired_path}", check=False)
+        if restorecon_result.returncode != 0:
+            raise DeployError(
+                f"Failed to apply SELinux context for {desired_path}: {restorecon_result.stderr}"
+            )
+
+        print(f"  SELinux context set to virt_image_t for {desired_path}.")
     else:
-        print("  Default storage pool already exists.")
-    
-    # Ensure pool is started (whether newly created or pre-existing)
+        print("  semanage/restorecon not found; skipping SELinux relabeling.")
+
+    # Ensure pool is started and set to autostart
     start_result = ssh_cmd(host, user, "virsh -c qemu:///system pool-start default", check=False)
     if start_result.returncode != 0 and "already active" not in start_result.stderr.lower():
         raise DeployError(f"Failed to start storage pool: {start_result.stderr}")
-    
-    # Ensure pool is set to autostart
+
     ssh_cmd(host, user, "virsh -c qemu:///system pool-autostart default", check=False)
     print("  Storage pool ready.")
     
