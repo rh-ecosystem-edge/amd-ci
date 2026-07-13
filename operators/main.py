@@ -32,7 +32,13 @@ from operators.config import (
     enable_cluster_monitoring,
 )
 from operators.constants import NAMESPACE_AMD_GPU
-from operators.install import install_all_operators, wait_for_device_config_crd
+from operators.install import (
+    install_amd_gpu_operator,
+    install_all_operators,
+    install_kmm,
+    install_nfd,
+    wait_for_device_config_crd,
+)
 from operators.prerequisites import configure_internal_registry, verify_required_operators
 
 if TYPE_CHECKING:
@@ -281,32 +287,27 @@ def wait_for_mcp_updated(
     )
 
 
-def install_operators(
+def install_base(
     oc: OcRunner,
     config: OperatorInstallConfig | None = None,
 ) -> None:
-    """Run full AMD GPU Operator installation flow per AMD docs and
-    eco-gotests ordering.
+    """Install GPU-version-independent base components.
+
+    This phase is safe to snapshot because nothing here depends on
+    the AMD GPU Operator version:
 
     1. Verify required operators (Service CA, OLM, MCO, Image Registry)
     2. Configure internal registry (storage, Managed)
     3. Wait for cluster stability
-    4. Create MachineConfig (amdgpu blacklist) — BEFORE operators to
-       avoid disrupting operator pods during the MCO node reboot
-    5. Wait for MachineConfigPool to finish updating
-    6. Wait for cluster stability after reboot
-    7. Install NFD, KMM, AMD GPU Operator via OLM
-    8. Create NodeFeatureDiscovery instance (starts NFD pods)
-    9. Create NodeFeatureRule (separate CR for AMD GPU detection)
-    10. Wait for NFD to label nodes
-    11. Create DeviceConfig
-    12. Enable cluster monitoring
-    13. Wait for cluster stability
-    14. Wait for GPU resources (device-plugin pods + amd.com/gpu capacity)
+    4. Create MachineConfig (amdgpu blacklist) + wait for reboot
+    5. Wait for cluster stability after reboot
+    6. Install NFD and KMM via OLM
+    7. Create NodeFeatureDiscovery instance
+    8. Create NodeFeatureRule for AMD GPU detection
     """
     cfg = config or OperatorInstallConfig()
     print("\n" + "=" * 60)
-    print("AMD GPU Operator & Dependencies Installation (OLM)")
+    print("Base Operator Installation (GPU-version-independent)")
     print("=" * 60)
 
     verify_required_operators(oc, timeout=cfg.prerequisite_timeout)
@@ -314,19 +315,54 @@ def install_operators(
 
     wait_for_cluster_stability(oc, timeout=cfg.cluster_stability_timeout)
 
-    # MachineConfig BEFORE operators — reboot would kill operator pods.
     create_amdgpu_blacklist(oc, role=cfg.machine_config_role)
     wait_for_mcp_updated(oc)
     wait_for_cluster_stability(oc, timeout=cfg.cluster_stability_timeout)
 
-    install_all_operators(
-        oc,
-        gpu_operator_version=cfg.gpu_operator_version,
-        timeout_per_operator=cfg.operator_timeout,
-    )
+    install_nfd(oc, timeout=cfg.operator_timeout)
+    install_kmm(oc, timeout=cfg.operator_timeout)
 
     create_nfd_instance(oc, ocp_version=cfg.ocp_version)
+
+    r = oc.oc("get", "namespace", NAMESPACE_AMD_GPU)
+    if r.returncode != 0:
+        print(f"  Creating namespace {NAMESPACE_AMD_GPU}...")
+        oc.oc("create", "namespace", NAMESPACE_AMD_GPU)
+
     create_nfd_feature_rule(oc)
+
+    print("\n" + "=" * 60)
+    print("Base installation complete.")
+    print("=" * 60)
+
+
+def install_gpu_operator(
+    oc: OcRunner,
+    config: OperatorInstallConfig | None = None,
+) -> None:
+    """Install GPU-version-specific components.
+
+    Runs after ``install_base`` (or after restoring a snapshot that
+    already includes the base). Requires PCI GPU passthrough to be
+    attached so NFD can detect the GPU.
+
+    1. Install AMD GPU Operator via OLM (version-pinned)
+    2. Wait for NFD to label nodes with GPU info
+    3. Create DeviceConfig
+    4. Enable cluster monitoring
+    5. Wait for cluster stability
+    6. Wait for GPU resources (device-plugin pods + amd.com/gpu)
+    """
+    cfg = config or OperatorInstallConfig()
+    print("\n" + "=" * 60)
+    print(f"AMD GPU Operator v{cfg.gpu_operator_version} Installation")
+    print("=" * 60)
+
+    install_amd_gpu_operator(
+        oc,
+        gpu_operator_version=cfg.gpu_operator_version,
+        timeout=cfg.operator_timeout,
+    )
 
     print("Waiting for NFD to label nodes (60s)...")
     time.sleep(60)
@@ -347,3 +383,17 @@ def install_operators(
     print("\n" + "=" * 60)
     print("AMD GPU Operator installation completed successfully.")
     print("=" * 60)
+
+
+def install_operators(
+    oc: OcRunner,
+    config: OperatorInstallConfig | None = None,
+) -> None:
+    """Run full AMD GPU Operator installation (base + GPU-specific).
+
+    Backward-compatible entry point that calls both phases sequentially.
+    When snapshot caching is enabled, the orchestrator in main.py calls
+    ``install_base`` and ``install_gpu_operator`` separately.
+    """
+    install_base(oc, config)
+    install_gpu_operator(oc, config)

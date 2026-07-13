@@ -34,6 +34,14 @@ ifndef CONFIG_FILE_PATH
 endif
 	python3 cluster-provision/main.py --config $(CONFIG_FILE_PATH) deploy
 
+# Stop OpenShift cluster VMs (preserve disks and snapshots for cache reuse)
+# Usage: make cluster-stop CONFIG_FILE_PATH=cluster-config.yaml
+cluster-stop:
+ifndef CONFIG_FILE_PATH
+	$(error CONFIG_FILE_PATH is required. Usage: make cluster-stop CONFIG_FILE_PATH=cluster-config.yaml)
+endif
+	python3 cluster-provision/main.py --config $(CONFIG_FILE_PATH) stop
+
 # Delete OpenShift cluster
 # Usage: make cluster-delete CONFIG_FILE_PATH=cluster-config.yaml
 cluster-delete:
@@ -86,12 +94,13 @@ help:
 	@echo "  make cluster-deploy   -> make cluster-operators -> make test-gpu"
 	@echo ""
 	@echo "Targets:"
-	@echo "  make cluster-deploy CONFIG_FILE_PATH=<path>    - Deploy cluster (no operators, no tests)"
+	@echo "  make cluster-deploy CONFIG_FILE_PATH=<path>    - Deploy cluster (with optional snapshot caching)"
 	@echo "  make cluster-operators CONFIG_FILE_PATH=<path> - Install AMD GPU operators (no tests)"
 	@echo "  make test-gpu CONFIG_FILE_PATH=<path>          - Run AMD GPU verification tests only"
 	@echo "  make test-gpu                                  - Run AMD GPU tests (local kubeconfig)"
 	@echo "  make cluster-cleanup CONFIG_FILE_PATH=<path>   - Clean up AMD GPU operator stack"
-	@echo "  make cluster-delete CONFIG_FILE_PATH=<path>    - Delete cluster"
+	@echo "  make cluster-stop CONFIG_FILE_PATH=<path>      - Stop VMs (keep disk + snapshots)"
+	@echo "  make cluster-delete CONFIG_FILE_PATH=<path>    - Delete cluster (removes everything)"
 	@echo "  make must-gather CONFIG_FILE_PATH=<path>       - Collect diagnostic data (NFD/GPU/KMM)"
 	@echo "  make help                                      - Show this help"
 	@echo ""
@@ -102,4 +111,4 @@ help:
 	@echo "  operators.install, operators.machine_config_role, operators.driver_version,"
 	@echo "  must_gather.artifact_dir (optional, default: ./must-gather-output)"
 
-.PHONY: test test-gpu cluster-deploy cluster-delete cluster-operators cluster-cleanup must-gather help
+.PHONY: test test-gpu cluster-deploy cluster-stop cluster-delete cluster-operators cluster-cleanup must-gather help

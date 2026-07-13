@@ -30,6 +30,14 @@ pci_devices: []
 wait_timeout: 3600
 version_channel: stable
 
+# VM snapshot caching: restore a pre-built OCP cluster instead of deploying from scratch.
+# When enabled, the first job for an OCP version does a full deploy + base operator install
+# (NFD, KMM, MachineConfig), takes a VM snapshot, then continues. Subsequent jobs for the
+# same OCP version restore the snapshot (~5 min instead of ~50 min).
+snapshot:
+  enabled: false          # set to true to enable snapshot caching
+  max_cached: 3           # max number of OCP version snapshots to keep on the host
+
 # Must-gather diagnostics
 must_gather:
   artifact_dir: ./must-gather-output   # local directory to store collected diagnostics
