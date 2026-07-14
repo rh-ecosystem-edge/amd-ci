@@ -11,9 +11,7 @@ restorable without re-running kcli.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
-from typing import Optional
 
 from shared.ssh import ssh_cmd, scp_cmd
 from vm import vm_state, shutdown_vm
@@ -43,70 +41,20 @@ def find_snapshot(
     return r.returncode == 0
 
 
-def list_snapshots(
-    host: str,
-    user: str,
-    vm_name: str,
-) -> list[str]:
-    """List all amd-ci snapshot names on a VM, oldest first (by creation time)."""
-    r = ssh_cmd(
-        host, user,
-        f"virsh snapshot-list {vm_name} --name --roots 2>/dev/null; "
-        f"virsh snapshot-list {vm_name} --name --leaves 2>/dev/null; "
-        f"virsh snapshot-list {vm_name} 2>/dev/null",
-        check=False,
-    )
-    # Parse the table output to get (creation-time, name) pairs for proper ordering.
-    # virsh snapshot-list outputs: Name, Creation Time, State
-    # Fall back to --name output if table parsing fails.
-    r_table = ssh_cmd(
-        host, user,
-        f"virsh snapshot-list {vm_name} 2>/dev/null",
-        check=False,
-    )
-    snapshots_with_time: list[tuple[str, str]] = []
-    if r_table.returncode == 0 and r_table.stdout:
-        for line in r_table.stdout.strip().splitlines():
-            line = line.strip()
-            if not line or line.startswith("Name") or line.startswith("-"):
-                continue
-            parts = line.split()
-            if len(parts) >= 3 and parts[0].startswith(SNAPSHOT_PREFIX):
-                name = parts[0]
-                creation_time = " ".join(parts[1:-1])
-                snapshots_with_time.append((creation_time, name))
-
-    if snapshots_with_time:
-        snapshots_with_time.sort()
-        return [name for _, name in snapshots_with_time]
-
-    # Fallback: use --name (alphabetical, less accurate)
-    r_names = ssh_cmd(
-        host, user,
-        f"virsh snapshot-list {vm_name} --name 2>/dev/null",
-        check=False,
-    )
-    if r_names.returncode != 0 or not r_names.stdout:
-        return []
-    return [
-        name.strip()
-        for name in r_names.stdout.strip().splitlines()
-        if name.strip().startswith(SNAPSHOT_PREFIX)
-    ]
-
-
 def create_snapshot(
     host: str,
     user: str,
     vm_name: str,
     ocp_version: str,
     kubeconfig_local_path: str,
-    max_cached: int = 3,
 ) -> str:
     """Create a snapshot of a shut-off VM and save the kubeconfig.
 
     The VM must be shut off before calling this function (offline
     snapshots are more reliable and portable than live ones).
+
+    Cluster-level eviction (deleting the oldest cached clusters when
+    over ``max_cached``) is handled by the caller before deploying.
 
     Returns the snapshot name.
     """
@@ -151,8 +99,6 @@ def create_snapshot(
         raise RuntimeError(
             f"Snapshot '{snap_name}' rolled back: kubeconfig save failed"
         ) from exc
-
-    evict_old_snapshots(host, user, vm_name, max_cached)
 
     return snap_name
 
@@ -226,21 +172,3 @@ def delete_snapshot(
     )
 
 
-def evict_old_snapshots(
-    host: str,
-    user: str,
-    vm_name: str,
-    max_cached: int,
-) -> None:
-    """Delete the oldest snapshots if more than max_cached exist."""
-    snapshots = list_snapshots(host, user, vm_name)
-
-    if len(snapshots) <= max_cached:
-        return
-
-    to_evict = snapshots[: len(snapshots) - max_cached]
-    for snap_name in to_evict:
-        version_match = re.match(rf"^{re.escape(SNAPSHOT_PREFIX)}(.+)$", snap_name)
-        version = version_match.group(1) if version_match else snap_name
-        print(f"  Evicting old snapshot: {snap_name}")
-        delete_snapshot(host, user, vm_name, version)

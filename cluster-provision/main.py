@@ -41,6 +41,16 @@ def _kubeconfig_path(cluster_name: str) -> Path:
     return Path.home() / ".kcli" / "clusters" / cluster_name / "auth" / "kubeconfig"
 
 
+def _snapshot_cluster_name(base_name: str, ocp_version: str) -> str:
+    """Build a version-specific cluster name for snapshot caching.
+
+    e.g. ("ocp", "4.22") -> "ocp-422", ("ocp", "4.22.5") -> "ocp-422"
+    Uses only major.minor so all patch versions share the same cached cluster.
+    """
+    parts = ocp_version.split(".")
+    return f"{base_name}-{parts[0]}{parts[1]}"
+
+
 def _get_oc_runner(config: ClusterConfig):
     """Build an OcRunner appropriate for the config (local or remote)."""
     from shared.oc_runner import LocalOcRunner
@@ -72,21 +82,110 @@ def _write_artifact(name: str, value: str) -> None:
         print(f"Wrote {name}: {value}")
 
 
+# ── Snapshot helpers ─────────────────────────────────────────────
+
+def _list_cached_clusters(host: str, user: str, base_name: str) -> list[str]:
+    """List version-specific cluster names present on the remote host.
+
+    Finds VMs matching ``{base_name}-<digits>-ctlplane-0`` and returns
+    the cluster name portion (e.g. ``["ocp-420", "ocp-421", "ocp-422"]``),
+    sorted alphabetically (oldest version first in typical usage).
+
+    Ignores the legacy base-name cluster (e.g. ``ocp-ctlplane-0``) since
+    it was created before multi-version caching.
+    """
+    from shared.ssh import ssh_cmd
+    import re
+
+    r = ssh_cmd(host, user, "virsh list --all --name", check=False)
+    if r.returncode != 0 or not r.stdout:
+        return []
+    clusters: set[str] = set()
+    prefix = f"{base_name}-"
+    for line in r.stdout.strip().splitlines():
+        vm = line.strip()
+        if vm.startswith(prefix) and "-ctlplane-" in vm:
+            cluster = vm.rsplit("-ctlplane-", 1)[0]
+            if cluster != base_name:
+                clusters.add(cluster)
+    return sorted(clusters)
+
+
+
+def _stop_running_clusters(
+    host: str,
+    user: str,
+    base_name: str,
+    exclude: str | None = None,
+) -> None:
+    """Shut down any running cached cluster VMs (except *exclude*)."""
+    from vm import shutdown_vm, vm_state as get_vm_state
+
+    for cluster in _list_cached_clusters(host, user, base_name):
+        if cluster == exclude:
+            continue
+        vm = f"{cluster}-ctlplane-0"
+        if get_vm_state(host, user, vm) == "running":
+            print(f"  Stopping running cached cluster {cluster}...")
+            shutdown_vm(host, user, vm)
+
+
+def _evict_cached_clusters(
+    host: str,
+    user: str,
+    base_name: str,
+    max_cached: int,
+    exclude: str | None = None,
+) -> None:
+    """Delete the oldest cached clusters when count exceeds *max_cached*.
+
+    Uses ``kcli delete cluster`` so VMs, disks, and snapshots are removed.
+    """
+    from remote import get_kcli_client_name
+    from common import run
+
+    clusters = _list_cached_clusters(host, user, base_name)
+    if exclude and exclude in clusters:
+        clusters = [c for c in clusters if c != exclude]
+
+    # Need to make room: we're about to add one, so evict until we have
+    # at most (max_cached - 1) existing clusters.
+    while len(clusters) >= max_cached:
+        victim = clusters.pop(0)
+        print(f"  Evicting cached cluster: {victim}")
+        kcli_client = get_kcli_client_name(host)
+        run(
+            ["kcli", "-C", kcli_client, "delete", "cluster", victim, "--yes"],
+            check=False,
+        )
+        import shutil
+        local_dir = Path.home() / ".kcli" / "clusters" / victim
+        if local_dir.is_dir():
+            shutil.rmtree(local_dir)
+
+
 # ── Deploy (with snapshot support) ──────────────────────────────
 
 def _deploy_with_snapshot(config: ClusterConfig, ocp_version: str) -> None:
     """Deploy via snapshot restore (cache hit) or full deploy + snapshot create (cache miss).
 
+    Each OCP minor version gets its own cluster/VM (e.g. ``ocp-422``),
+    allowing up to ``max_cached`` versions to coexist on the host.
+    Only one cluster runs at a time (they share the same API IP).
+
     Flow on cache hit:
-      1. Revert VM to snapshot
-      2. Attach PCI devices + start VM
-      3. Wait for cluster API
+      1. Stop any other running cached cluster
+      2. Revert VM to snapshot
+      3. Attach PCI devices + start VM
+      4. Wait for cluster API
 
     Flow on cache miss:
-      1. Full kcli deploy (WITHOUT PCI — keep snapshot PCI-clean)
-      2. Install base operators (NFD, KMM, MachineConfig + reboot)
-      3. Shut down VM → create snapshot → attach PCI → start VM
-      4. Wait for cluster API
+      1. Stop any running cached cluster
+      2. Evict oldest clusters if at capacity
+      3. Full kcli deploy (WITHOUT PCI — keep snapshot PCI-clean)
+      4. Install base operators (NFD, KMM, MachineConfig + reboot)
+      5. Shut down VM → create snapshot → attach PCI → start VM
+      6. Wait for cluster API
     """
     from remote import (
         setup_remote_libvirt,
@@ -100,18 +199,16 @@ def _deploy_with_snapshot(config: ClusterConfig, ocp_version: str) -> None:
     from snapshot import find_snapshot, create_snapshot, revert_snapshot
     from vm import (
         attach_pci_devices,
-        destroy_vm,
         fix_container_storage,
         shutdown_vms,
         start_vms,
         detach_all_pci_devices,
-        shutdown_vm,
     )
-    from deploy import push_ssh_key_to_remote
 
     host = config.remote.host
     user = config.remote.user
-    cluster_name = config.cluster_name
+    cluster_name = config.cluster_name   # already version-specific (e.g. ocp-422)
+    base_name = cluster_name.rsplit("-", 1)[0]  # original base name (e.g. ocp)
     ctlplanes = config.ctlplanes
     vm_name = f"{cluster_name}-ctlplane-0"
     kubeconfig = _kubeconfig_path(cluster_name)
@@ -124,6 +221,7 @@ def _deploy_with_snapshot(config: ClusterConfig, ocp_version: str) -> None:
     print(f"{'='*60}")
     print(f"  Remote Host: {user}@{host}")
     print(f"  OCP Version: {ocp_version}")
+    print(f"  Cluster Name: {cluster_name}")
     print(f"  Snapshot cache: max {config.snapshot.max_cached} versions")
     print(f"{'='*60}\n")
 
@@ -133,6 +231,8 @@ def _deploy_with_snapshot(config: ClusterConfig, ocp_version: str) -> None:
     if find_snapshot(host, user, vm_name, ocp_version):
         # ── CACHE HIT ──
         print(f"\nSnapshot found for OCP {ocp_version} — restoring...")
+
+        _stop_running_clusters(host, user, base_name, exclude=cluster_name)
 
         revert_snapshot(host, user, vm_name, ocp_version, str(kubeconfig))
 
@@ -152,9 +252,15 @@ def _deploy_with_snapshot(config: ClusterConfig, ocp_version: str) -> None:
         # ── CACHE MISS ──
         print(f"\nNo snapshot for OCP {ocp_version} — full deploy...")
 
+        _stop_running_clusters(host, user, base_name)
+        _evict_cached_clusters(
+            host, user, base_name,
+            max_cached=config.snapshot.max_cached,
+            exclude=cluster_name,
+        )
+
         params = get_kcli_params(config, ocp_version)
 
-        # Deploy WITHOUT PCI so the snapshot is PCI-clean
         deploy_cluster(
             params=params,
             remote_host=host,
@@ -164,7 +270,6 @@ def _deploy_with_snapshot(config: ClusterConfig, ocp_version: str) -> None:
             ssh_key=config.remote.ssh_key_path,
         )
 
-        # Run base operator install (GPU-version-independent)
         print("\nInstalling base operators for snapshot...")
         oc = _get_oc_runner(config)
         from operators.main import install_base, OperatorInstallConfig
@@ -182,7 +287,6 @@ def _deploy_with_snapshot(config: ClusterConfig, ocp_version: str) -> None:
         if hasattr(oc, "close"):
             oc.close()
 
-        # Shut down VM, detach PCI (in case deploy attached any), create snapshot
         print("\nCreating snapshot...")
         shutdown_vms(host, user, cluster_name, ctlplanes)
         detach_all_pci_devices(host, user, vm_name)
@@ -190,10 +294,8 @@ def _deploy_with_snapshot(config: ClusterConfig, ocp_version: str) -> None:
         create_snapshot(
             host, user, vm_name, ocp_version,
             kubeconfig_local_path=str(kubeconfig),
-            max_cached=config.snapshot.max_cached,
         )
 
-        # Attach PCI and start
         if config.pci_devices:
             print("\nAttaching PCI devices...")
             attach_pci_devices(host, user, vm_name, config.pci_devices)
@@ -316,6 +418,23 @@ def cmd_stop(config: ClusterConfig) -> int:
 
 
 def cmd_delete(config: ClusterConfig) -> int:
+    if config.snapshot.enabled and config.remote.host:
+        base_name = config.cluster_name.rsplit("-", 1)[0]
+        cached = _list_cached_clusters(
+            config.remote.host, config.remote.user, base_name,
+        )
+        if cached:
+            print(f"Deleting all cached clusters: {', '.join(cached)}")
+            for cluster in cached:
+                delete_cluster(
+                    params={"cluster": cluster},
+                    remote_host=config.remote.host,
+                    remote_user=config.remote.user,
+                    ssh_key=config.remote.ssh_key_path,
+                )
+            return 0
+        print("No cached clusters found.")
+
     params = {"cluster": config.cluster_name}
     delete_cluster(
         params=params,
@@ -445,6 +564,11 @@ def main(argv: list[str] | None = None) -> int:
     except (FileNotFoundError, KeyError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
+
+    if config.snapshot.enabled:
+        config.cluster_name = _snapshot_cluster_name(
+            config.cluster_name, config.ocp_version,
+        )
 
     handler = COMMANDS.get(command)
     if not handler:
