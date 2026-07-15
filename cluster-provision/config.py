@@ -229,7 +229,7 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
             enable_metrics=operators_data["enable_metrics"],
         )
 
-        snapshot_data = raw_config.get("snapshot", {})
+        snapshot_data = raw_config.get("snapshot") or {}
         snapshot = SnapshotConfig(
             enabled=snapshot_data.get("enabled", False),
             max_cached=snapshot_data.get("max_cached", 3),

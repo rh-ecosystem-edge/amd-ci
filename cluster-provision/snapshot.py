@@ -35,7 +35,7 @@ def find_snapshot(
     snap_name = get_snapshot_name(ocp_version)
     r = ssh_cmd(
         host, user,
-        f"virsh snapshot-list {vm_name} --name 2>/dev/null | grep -qx '{snap_name}'",
+        f"virsh snapshot-list {vm_name} --name 2>/dev/null | grep -Fqx '{snap_name}'",
         check=False,
     )
     return r.returncode == 0
@@ -162,8 +162,10 @@ def delete_snapshot(
         check=False,
         timeout=120,
     )
-    if r.returncode != 0 and "not found" not in (r.stderr or "").lower():
+    not_found = "not found" in (r.stderr or "").lower()
+    if r.returncode != 0 and not not_found:
         print(f"  Warning: failed to delete snapshot '{snap_name}': {r.stderr}")
+        return
 
     ssh_cmd(
         host, user,

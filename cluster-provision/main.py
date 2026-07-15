@@ -48,6 +48,10 @@ def _snapshot_cluster_name(base_name: str, ocp_version: str) -> str:
     Uses only major.minor so all patch versions share the same cached cluster.
     """
     parts = ocp_version.split(".")
+    if len(parts) < 2:
+        raise ValueError(
+            f"OCP version must be at least major.minor (got '{ocp_version}')"
+        )
     return f"{base_name}-{parts[0]}{parts[1]}"
 
 
@@ -154,10 +158,13 @@ def _evict_cached_clusters(
         victim = clusters.pop(0)
         print(f"  Evicting cached cluster: {victim}")
         kcli_client = get_kcli_client_name(host)
-        run(
+        result = run(
             ["kcli", "-C", kcli_client, "delete", "cluster", victim, "--yes"],
             check=False,
         )
+        if result.returncode != 0:
+            print(f"  Warning: failed to evict {victim} (rc={result.returncode})")
+            continue
         import shutil
         local_dir = Path.home() / ".kcli" / "clusters" / victim
         if local_dir.is_dir():
@@ -217,7 +224,7 @@ def _deploy_with_snapshot(config: ClusterConfig, ocp_version: str) -> None:
         set_ssh_key_path(config.remote.ssh_key_path)
 
     print(f"\n{'='*60}")
-    print(f"Deploy with Snapshot Caching")
+    print("Deploy with Snapshot Caching")
     print(f"{'='*60}")
     print(f"  Remote Host: {user}@{host}")
     print(f"  OCP Version: {ocp_version}")
@@ -326,12 +333,19 @@ def cmd_deploy(config: ClusterConfig, config_file: str) -> int:
     )
 
     is_sno = config.ctlplanes == 1 and config.workers == 0
-    if config.snapshot.enabled and config.remote.host and is_sno:
+    use_snapshot = config.snapshot.enabled and is_sno and config.remote.host
+
+    if config.snapshot.enabled and not use_snapshot:
+        if not is_sno:
+            print("Warning: snapshot caching is only supported for SNO clusters. "
+                  "Falling back to full deploy.")
+        elif not config.remote.host:
+            print("Warning: snapshot caching requires a remote host. "
+                  "Falling back to full deploy.")
+        config.snapshot.enabled = False
+
+    if use_snapshot:
         _deploy_with_snapshot(config, ocp_version)
-    elif config.snapshot.enabled and not is_sno:
-        print("Warning: snapshot caching is only supported for SNO clusters. "
-              "Falling back to full deploy.")
-        config.snapshot.enabled = False  # disable for operators step too
     else:
         params = get_kcli_params(config, ocp_version)
         print_config(params)
@@ -339,7 +353,7 @@ def cmd_deploy(config: ClusterConfig, config_file: str) -> int:
             print(f"PCI Passthrough Devices: {config.pci_devices}")
         print(f"Config file: {config_file}")
 
-        deploy_cluster(
+        actual_version = deploy_cluster(
             params=params,
             remote_host=config.remote.host,
             pci_devices=config.pci_devices,
@@ -347,6 +361,14 @@ def cmd_deploy(config: ClusterConfig, config_file: str) -> int:
             wait_timeout=config.wait_timeout,
             ssh_key=config.remote.ssh_key_path,
         )
+
+        if actual_version and actual_version != ocp_version:
+            print(
+                f"Error: version mismatch — requested {ocp_version} but "
+                f"cluster deployed {actual_version}.",
+                file=sys.stderr,
+            )
+            return 1
 
     _write_artifact("ocp.version", ocp_version)
     return 0
@@ -375,7 +397,8 @@ def cmd_operators(config: ClusterConfig) -> int:
         ocp_version=config.ocp_version,
     )
 
-    if config.snapshot.enabled:
+    is_sno = config.ctlplanes == 1 and config.workers == 0
+    if config.snapshot.enabled and config.remote.host and is_sno:
         install_gpu_operator(oc, config=op_config)
     else:
         install_operators(oc, config=op_config)
@@ -579,7 +602,7 @@ def main(argv: list[str] | None = None) -> int:
         if command == "deploy":
             return handler(config, args.config_file)
         return handler(config)
-    except FileNotFoundError as e:
+    except (FileNotFoundError, RuntimeError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 

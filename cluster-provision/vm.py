@@ -17,8 +17,7 @@ from shared.ssh import ssh_cmd
 
 def vm_exists(host: str, user: str, vm_name: str) -> bool:
     """Check whether a VM is defined on the remote host."""
-    r = ssh_cmd(host, user, f"virsh domstate {vm_name}", check=False)
-    return r.returncode == 0 and "error" not in (r.stderr or "").lower()
+    return vm_state(host, user, vm_name) is not None
 
 
 def vm_state(host: str, user: str, vm_name: str) -> Optional[str]:
@@ -120,8 +119,7 @@ def fix_container_storage(
     for idx in range(ctlplanes):
         vm_name = f"{cluster_name}-ctlplane-{idx}"
 
-        r = ssh_cmd(host, user, f"virsh domstate {vm_name}", check=False)
-        if "shut off" not in (r.stdout or ""):
+        if vm_state(host, user, vm_name) != "shut off":
             print(f"  {vm_name}: VM is not shut off — skipping.")
             continue
 
@@ -174,8 +172,13 @@ def attach_pci_devices(
             )
 
         domain, bus, slot, function = parts
-        for part in (domain, bus, slot, function):
-            int(part, 16)  # validate hex
+        try:
+            for part in (domain, bus, slot, function):
+                int(part, 16)
+        except ValueError as err:
+            raise RuntimeError(
+                f"Invalid PCI address format: {pci_addr}. Expected: 0000:XX:YY.Z"
+            ) from err
 
         xml_file = f"/tmp/pci-{pci_addr.replace(':', '-').replace('.', '-')}.xml"
         xml_content = (
@@ -223,6 +226,13 @@ def attach_pci_devices(
 
 def detach_all_pci_devices(host: str, user: str, vm_name: str) -> None:
     """Detach all PCI hostdev devices from a VM (must be shut off)."""
+    state = vm_state(host, user, vm_name)
+    if state and state != "shut off":
+        raise RuntimeError(
+            f"VM '{vm_name}' must be shut off before detaching PCI devices "
+            f"(current state: {state})"
+        )
+
     r = ssh_cmd(
         host, user,
         f"virsh dumpxml {vm_name} | grep -c hostdev",
@@ -241,16 +251,18 @@ def detach_all_pci_devices(host: str, user: str, vm_name: str) -> None:
     if r.returncode != 0:
         return
 
-    for match in re.finditer(r"(<hostdev.*?</hostdev>)", r.stdout or "", re.DOTALL):
+    for idx, match in enumerate(re.finditer(r"(<hostdev.*?</hostdev>)", r.stdout or "", re.DOTALL)):
         hostdev_xml = match.group(1)
         xml_b64 = base64.b64encode(hostdev_xml.encode()).decode()
-        tmp = "/tmp/detach-hostdev.xml"
+        tmp = f"/tmp/detach-hostdev-{vm_name}-{idx}.xml"
         ssh_cmd(host, user, f"echo {xml_b64} | base64 -d > {tmp}", check=False)
-        ssh_cmd(
+        r = ssh_cmd(
             host, user,
             f"virsh detach-device {vm_name} {tmp} --config",
             check=False,
         )
+        if r.returncode != 0:
+            print(f"    Warning: failed to detach hostdev: {(r.stderr or '').strip()}")
         ssh_cmd(host, user, f"rm -f {tmp}", check=False)
 
     print("  PCI devices detached.")
