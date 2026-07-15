@@ -8,12 +8,13 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from common import DeployError, run
 from config import get_cluster_topology_description
 from kcli_preflight import ensure_kcli_installed, ensure_pull_secret_exists, ensure_kcli_config
 from shared.oc_runner import OcRunner, LocalOcRunner, RemoteOcRunner, REMOTE_KUBECONFIG
+from vm import shutdown_vms, start_vms, fix_container_storage, attach_pci_devices
 
 
 def push_ssh_key_to_remote(host: str, user: str) -> None:
@@ -37,80 +38,6 @@ def push_ssh_key_to_remote(host: str, user: str) -> None:
         "ssh-keygen -y -f /root/.ssh/id_rsa > /root/.ssh/id_rsa.pub 2>/dev/null",
         check=False,
     )
-
-
-def fix_vm_container_storage(
-    host: str, user: str, cluster_name: str, ctlplanes: int
-) -> None:
-    """Wipe pre-baked container storage on RHCOS VMs via guestfish.
-
-    Works around a composefs/overlay bug where ``podman pull`` fails with
-    ``readlink /var/lib/containers/storage/overlay/l: invalid argument``.
-
-    The RHCOS qcow2 image ships pre-baked overlay layers that are
-    incompatible with fresh podman pulls when used through kcli's
-    qcow2-on-qcow2 overlay. Wiping the directory lets the
-    ``machine-config-daemon-pull`` service succeed.
-
-    The VMs must be shut off before calling this function.
-    """
-    from shared.ssh import ssh_cmd
-
-    print("\nStep 5c: Fixing RHCOS container storage (composefs overlay workaround)...")
-
-    r = ssh_cmd(host, user, "command -v guestfish", check=False)
-    if r.returncode != 0:
-        print("  Installing libguestfs-tools on remote host...")
-        ssh_cmd(host, user, "dnf -y install libguestfs-tools-c", check=False, timeout=300)
-
-    storage_path = "/ostree/deploy/rhcos/var/lib/containers/storage"
-
-    for idx in range(ctlplanes):
-        vm_name = f"{cluster_name}-ctlplane-{idx}"
-
-        r = ssh_cmd(host, user, f"virsh domstate {vm_name}", check=False)
-        if "shut off" not in (r.stdout or ""):
-            print(f"{vm_name}: VM is not shut off — skipping.")
-            continue
-
-        gf_script = f"run\nmount /dev/sda4 /\nglob rm-rf {storage_path}/*\n"
-        r = ssh_cmd(host, user, f"echo '{gf_script}' | guestfish --rw -d {vm_name}", check=False, timeout=120)
-        if r.returncode == 0:
-            print(f"{vm_name}: container storage wiped.")
-        else:
-            print(f"    {vm_name}: guestfish failed (rc={r.returncode}): "
-                  f"{(r.stderr or '').strip()}")
-
-
-def shutdown_vms(host: str, user: str, cluster_name: str, ctlplanes: int) -> None:
-    """Shut down control plane VMs and wait for them to be off."""
-    from shared.ssh import ssh_cmd
-
-    for idx in range(ctlplanes):
-        vm_name = f"{cluster_name}-ctlplane-{idx}"
-        ssh_cmd(host, user, f"virsh shutdown {vm_name}", check=False)
-
-    for idx in range(ctlplanes):
-        vm_name = f"{cluster_name}-ctlplane-{idx}"
-        for _ in range(24):
-            time.sleep(5)
-            r = ssh_cmd(host, user, f"virsh domstate {vm_name}", check=False)
-            if "shut off" in (r.stdout or ""):
-                print(f"  {vm_name} shut off.")
-                break
-        else:
-            ssh_cmd(host, user, f"virsh destroy {vm_name}", check=False)
-            time.sleep(2)
-
-
-def start_vms(host: str, user: str, cluster_name: str, ctlplanes: int) -> None:
-    """Start control plane VMs."""
-    from shared.ssh import ssh_cmd
-
-    for idx in range(ctlplanes):
-        vm_name = f"{cluster_name}-ctlplane-{idx}"
-        ssh_cmd(host, user, f"virsh start {vm_name}", check=False)
-        print(f"  {vm_name} started.")
 
 
 def build_kcli_params(params: Dict[str, str]) -> List[str]:
@@ -268,7 +195,6 @@ def deploy_remote(
         get_cluster_status,
         print_access_instructions,
         set_ssh_key_path,
-        attach_pci_devices,
     )
     
     topology = get_cluster_topology_description(ctlplanes, workers)
@@ -380,12 +306,12 @@ def deploy_remote(
         ctlplane_vm = f"{cluster_name}-ctlplane-0"
         attach_pci_devices(
             remote_host, remote_user, ctlplane_vm, pci_devices,
-            pre_start_hook=lambda: fix_vm_container_storage(
+            pre_start_hook=lambda: fix_container_storage(
                 remote_host, remote_user, cluster_name, ctlplanes),
         )
     else:
         shutdown_vms(remote_host, remote_user, cluster_name, ctlplanes)
-        fix_vm_container_storage(remote_host, remote_user, cluster_name, ctlplanes)
+        fix_container_storage(remote_host, remote_user, cluster_name, ctlplanes)
         start_vms(remote_host, remote_user, cluster_name, ctlplanes)
 
     # Step 6: Setup remote cluster access

@@ -46,6 +46,14 @@ class OperatorsConfig:
 
 
 @dataclass
+class SnapshotConfig:
+    """VM snapshot caching configuration (optional in YAML, has defaults)."""
+
+    enabled: bool
+    max_cached: int
+
+
+@dataclass
 class MustGatherConfig:
     """Must-gather diagnostics configuration (optional in YAML, has defaults)."""
 
@@ -57,7 +65,8 @@ class ClusterConfig:
     """Complete cluster configuration.
 
     All fields are required and must be set explicitly in the YAML config file,
-    except for must_gather which is optional and has sensible defaults.
+    except for ``snapshot`` and ``must_gather`` which are optional and have
+    sensible defaults.
     """
 
     ocp_version: str
@@ -76,6 +85,7 @@ class ClusterConfig:
     wait_timeout: int
     version_channel: str
     operators: OperatorsConfig
+    snapshot: SnapshotConfig
     must_gather: MustGatherConfig
 
 def _expand_path(path: str | None) -> str | None:
@@ -219,6 +229,12 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
             enable_metrics=operators_data["enable_metrics"],
         )
 
+        snapshot_data = raw_config.get("snapshot") or {}
+        snapshot = SnapshotConfig(
+            enabled=snapshot_data.get("enabled", False),
+            max_cached=snapshot_data.get("max_cached", 3),
+        )
+
         must_gather_data = raw_config.get("must_gather", {})
         must_gather = MustGatherConfig(
             artifact_dir=_expand_path(must_gather_data.get("artifact_dir", "./must-gather-output")),
@@ -241,6 +257,7 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
             wait_timeout=raw_config["wait_timeout"],
             version_channel=raw_config["version_channel"],
             operators=operators,
+            snapshot=snapshot,
             must_gather=must_gather,
         )
     except KeyError as exc:
