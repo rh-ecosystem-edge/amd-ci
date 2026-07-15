@@ -41,7 +41,7 @@ AMDGPU_BLACKLIST_CONTENTS_B64 = "YmxhY2tsaXN0IGFtZGdwdQo="
 # DeviceConfig (CRD installed by AMD GPU Operator)
 DEVICECONFIG_CRD_NAME = "deviceconfigs.amd.com"
 DEVICECONFIG_NAME = "amd-gpu-device-config"
-DEFAULT_DRIVER_VERSION = "30.20.1"
+DEFAULT_DRIVER_VERSION = "31.30"
 AMD_GPU_LABEL = "feature.node.kubernetes.io/amd-gpu"
 DEFAULT_DRIVER_IMAGE = "image-registry.openshift-image-registry.svc:5000/$MOD_NAMESPACE/amdgpu_kmod"
 

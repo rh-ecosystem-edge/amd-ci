@@ -20,7 +20,7 @@ Enable in your cluster config YAML:
 operators:
   install: true
   machine_config_role: worker   # use "master" for SNO
-  driver_version: "30.20.1"
+  driver_version: "31.30"
   enable_metrics: true
 ```
 
