@@ -195,7 +195,7 @@ spec:
   driver:
     enable: true
     image: {image}
-    version: {driver_version}
+    version: "{driver_version}"
   devicePlugin:
     enableNodeLabeller: true
   selector:
