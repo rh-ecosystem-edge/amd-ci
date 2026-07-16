@@ -48,5 +48,5 @@ operators:
   install: false
   gpu_operator_version: "1.4"   # AMD GPU Operator minor version (e.g. "1.4"); resolves to latest patch (e.g. 1.4.1)
   machine_config_role: worker   # use "master" for Single Node OpenShift (SNO)
-  driver_version: "30.20.1"
+  driver_version: "31.30"
   enable_metrics: true

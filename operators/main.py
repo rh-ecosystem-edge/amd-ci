@@ -53,8 +53,8 @@ class OperatorInstallConfig:
     machine_config_role: str = "worker"
     # Full AMD GPU Operator version to install (e.g. "1.4.1"); used as startingCSV
     gpu_operator_version: str = "1.4.1"
-    # ROCm/amdgpu driver version (e.g. 30.20.1)
-    driver_version: str = "30.20.1"
+    # ROCm/amdgpu driver version (e.g. 31.30)
+    driver_version: str = "31.30"
     # Enable metrics exporter and ServiceMonitor
     enable_metrics: bool = True
     # OCP version for NFD operand image (4.16 requires explicit image)
