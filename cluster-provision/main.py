@@ -122,8 +122,12 @@ def _stop_running_clusters(
     base_name: str,
     exclude: str | None = None,
 ) -> None:
-    """Shut down any running cached cluster VMs (except *exclude*)."""
-    from vm import shutdown_vm, vm_state as get_vm_state
+    """Shut down any running cached cluster VMs (except *exclude*).
+
+    Stops both ctlplane and bootstrap VMs so that stale bootstraps
+    don't hold the shared API VIP and interfere with the next deploy.
+    """
+    from vm import shutdown_vm, destroy_vm, vm_state as get_vm_state
 
     for cluster in _list_cached_clusters(host, user, base_name):
         if cluster == exclude:
@@ -132,6 +136,10 @@ def _stop_running_clusters(
         if get_vm_state(host, user, vm) == "running":
             print(f"  Stopping running cached cluster {cluster}...")
             shutdown_vm(host, user, vm)
+        bootstrap = f"{cluster}-bootstrap"
+        if get_vm_state(host, user, bootstrap) == "running":
+            print(f"  Stopping bootstrap VM {bootstrap}...")
+            destroy_vm(host, user, bootstrap)
 
 
 def _evict_cached_clusters(
@@ -420,7 +428,7 @@ def cmd_stop(config: ClusterConfig) -> int:
         from shared.ssh import set_ssh_key_path
         set_ssh_key_path(config.remote.ssh_key_path)
 
-    from vm import shutdown_vm, vm_exists
+    from vm import shutdown_vm, destroy_vm, vm_exists
 
     host = config.remote.host
     user = config.remote.user
@@ -435,6 +443,11 @@ def cmd_stop(config: ClusterConfig) -> int:
             print(f"  {vm_name} stopped.")
         else:
             print(f"  {vm_name} not found — skipping.")
+
+    bootstrap_vm = f"{cluster_name}-bootstrap"
+    if vm_exists(host, user, bootstrap_vm):
+        destroy_vm(host, user, bootstrap_vm)
+        print(f"  {bootstrap_vm} stopped.")
 
     print("Cluster VMs stopped (disk and snapshots preserved).")
     return 0

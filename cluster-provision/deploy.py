@@ -14,7 +14,7 @@ from common import DeployError, run
 from config import get_cluster_topology_description
 from kcli_preflight import ensure_kcli_installed, ensure_pull_secret_exists, ensure_kcli_config
 from shared.oc_runner import OcRunner, LocalOcRunner, RemoteOcRunner, REMOTE_KUBECONFIG
-from vm import shutdown_vms, start_vms, fix_container_storage, attach_pci_devices
+from vm import shutdown_vms, start_vms, fix_container_storage, attach_pci_devices, destroy_vm
 
 
 def push_ssh_key_to_remote(host: str, user: str) -> None:
@@ -169,6 +169,31 @@ def deploy_local(
     return actual_version
 
 
+def _destroy_stale_bootstraps(
+    remote_host: str,
+    remote_user: str,
+    cluster_name: str,
+) -> None:
+    """Destroy any bootstrap VMs from other clusters on the host.
+
+    All clusters share the same API VIP via keepalived. A stale bootstrap
+    from a previous deployment will compete for the VIP and prevent the
+    new cluster's control plane from fetching its ignition config.
+    """
+    from shared.ssh import ssh_cmd
+
+    r = ssh_cmd(remote_host, remote_user, "virsh list --all --name", check=False)
+    if r.returncode != 0 or not r.stdout:
+        return
+
+    current_bootstrap = f"{cluster_name}-bootstrap"
+    for line in r.stdout.strip().splitlines():
+        vm = line.strip()
+        if vm and vm.endswith("-bootstrap") and vm != current_bootstrap:
+            print(f"  Destroying stale bootstrap VM: {vm}")
+            destroy_vm(remote_host, remote_user, vm)
+
+
 def deploy_remote(
     params: Dict[str, Any],
     cluster_name: str,
@@ -231,6 +256,7 @@ def deploy_remote(
 
     # Step 3: Clean up any existing cluster
     print(f"\nStep 3: Cleaning up any existing cluster '{cluster_name}'...")
+    _destroy_stale_bootstraps(remote_host, remote_user, cluster_name)
     run(["kcli", "-C", kcli_client, "delete", "cluster", cluster_name, "--yes"], check=False)
     clusters_dir = Path.home() / ".kcli" / "clusters" / cluster_name
     if clusters_dir.is_dir():
