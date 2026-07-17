@@ -924,9 +924,9 @@
             {
                 "ocp_full_version": "4.22.5",
                 "gpu_operator_version": "1.5.0",
-                "test_status": "FAILURE",
-                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/pull/rh-ecosystem-edge_amd-ci/155/pull-ci-rh-ecosystem-edge-amd-ci-main-4.22-stable-e2e-amd-ci-1-5-x/2077730006104018944",
-                "job_timestamp": "1784209314"
+                "test_status": "SUCCESS",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/pull/rh-ecosystem-edge_amd-ci/156/pull-ci-rh-ecosystem-edge-amd-ci-main-4.22-stable-e2e-amd-ci-1-5-x/2077787162010456064",
+                "job_timestamp": "1784219864"
             },
             {
                 "ocp_full_version": "4.22.5",
