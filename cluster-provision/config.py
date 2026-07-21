@@ -43,6 +43,7 @@ class OperatorsConfig:
     machine_config_role: str
     driver_version: str
     enable_metrics: bool
+    use_source_image: bool
 
 
 @dataclass
@@ -227,6 +228,7 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
             machine_config_role=operators_data["machine_config_role"],
             driver_version=str(operators_data["driver_version"]),
             enable_metrics=operators_data["enable_metrics"],
+            use_source_image=operators_data.get("use_source_image"),
         )
 
         snapshot_data = raw_config.get("snapshot") or {}

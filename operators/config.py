@@ -167,6 +167,7 @@ def create_device_config(
     driver_image: str | None = None,
     enable_metrics: bool = True,
     api_version: str = "amd.com/v1alpha1",
+    use_source_image: bool | None = None,
 ) -> None:
     """
     Create DeviceConfig CR to trigger GPU driver installation and optional metrics.
@@ -196,6 +197,8 @@ spec:
     enable: true
     image: {image}
     version: "{driver_version}"
+    {"useSourceImage: " + str(use_source_image).lower()
+      if use_source_image is not None else ''}
   devicePlugin:
     enableNodeLabeller: true
   selector:

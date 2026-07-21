@@ -403,6 +403,7 @@ def cmd_operators(config: ClusterConfig) -> int:
         driver_version=config.operators.driver_version,
         enable_metrics=config.operators.enable_metrics,
         ocp_version=config.ocp_version,
+        use_source_image=config.operators.use_source_image,
     )
 
     is_sno = config.ctlplanes == 1 and config.workers == 0
