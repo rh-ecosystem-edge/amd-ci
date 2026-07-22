@@ -65,6 +65,8 @@ class OperatorInstallConfig:
     operator_timeout: int = 600
     cluster_stability_timeout: int = 900
     gpu_ready_timeout: int = 1800
+    # use_source_image - Set the useSourceImage under 'spec.driver' in the DeviceConfig CR to true/false
+    use_source_image: bool | None = None
 
 
 def wait_for_cluster_stability(
@@ -374,6 +376,7 @@ def install_gpu_operator(
         driver_version=cfg.driver_version,
         enable_metrics=cfg.enable_metrics,
         api_version=api_version,
+        use_source_image=cfg.use_source_image,
     )
     enable_cluster_monitoring(oc)
 
