@@ -25,6 +25,8 @@ remote:
   host: null
   user: root
   ssh_key_path: null
+  libvirt_pool_path: null   # optional: force a specific libvirt storage pool directory. Leave null to auto-select the mount with the most free space
+  min_free_space_gb: 100    # minimum free space (GB) required for a storage location to be considered acceptable
 
 pci_devices: []
 wait_timeout: 3600
