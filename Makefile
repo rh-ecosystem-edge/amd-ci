@@ -1,5 +1,8 @@
 test:
-	PYTHONPATH=. python3 -m unittest discover -s workflows/gpu_operator_versions/tests -v
+	@status=0; \
+	PYTHONPATH=. python3 -m unittest discover -s workflows/gpu_operator_versions/tests -v || status=1; \
+	PYTHONPATH=. python3 -m unittest discover -s workflows/common/tests -v || status=1; \
+	exit $$status
 
 # Run AMD GPU operator verification tests (cluster must be ready with operators installed)
 # For local clusters:  make test-gpu KUBECONFIG=~/.kcli/clusters/<name>/auth/kubeconfig

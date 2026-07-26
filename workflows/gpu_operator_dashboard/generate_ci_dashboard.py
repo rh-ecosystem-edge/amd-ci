@@ -1,11 +1,13 @@
+import html
 import json
 import argparse
 
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timezone
 
 from workflows.common.utils import logger
 from workflows.common.templates import load_template
+from workflows.common.broken_versions import find_broken_entry, load_broken_versions, notes_for_ocp_key
 from workflows.gpu_operator_dashboard.fetch_ci_data import (
     OCP_FULL_VERSION, GPU_OPERATOR_VERSION, STATUS_ABORTED)
 
@@ -24,13 +26,17 @@ def version_sort_key(version_str: str) -> Tuple[int, ...]:
     return tuple(parts)
 
 
-def generate_test_matrix(ocp_data: Dict[str, Dict[str, Any]]) -> str:
+def generate_test_matrix(ocp_data: Dict[str, Dict[str, Any]], broken_entries: Optional[List[Dict[str, Any]]] = None) -> str:
     """
     Build the final HTML report by:
       1. Reading the header template,
       2. Generating the table blocks for each OCP version,
       3. Reading the footer template and injecting the last-updated time.
+
+    Results matching an entry in broken_entries are excluded from the table, and a note
+    explaining why is added to that OCP version's Notes section (see notes_for_ocp_key).
     """
+    broken_entries = broken_entries or []
     header_template = load_template("header.html")
     html_content = header_template
     main_table_template = load_template("main_table.html")
@@ -38,13 +44,16 @@ def generate_test_matrix(ocp_data: Dict[str, Dict[str, Any]]) -> str:
     html_content += build_toc(sorted_ocp_keys)
 
     for ocp_key in sorted_ocp_keys:
-        notes = ocp_data[ocp_key].get("notes", [])
+        notes = list(ocp_data[ocp_key].get("notes", [])) + notes_for_ocp_key(ocp_key, broken_entries)
         release_results = ocp_data[ocp_key].get("release_tests", [])
 
         regular_results = []
         for r in release_results:
-            if r.get("test_status") != STATUS_ABORTED:
-                regular_results.append(r)
+            if r.get("test_status") == STATUS_ABORTED:
+                continue
+            if find_broken_entry(r.get(OCP_FULL_VERSION), r.get(GPU_OPERATOR_VERSION), broken_entries):
+                continue
+            regular_results.append(r)
         notes_html = build_notes(notes)
         table_rows_html = build_catalog_table_rows(regular_results)
         table_block = main_table_template
@@ -126,7 +135,7 @@ def build_notes(notes: List[str]) -> str:
     if not notes:
         return ""
 
-    items = "\n".join(f'<li class="note-item">{n}</li>' for n in notes)
+    items = "\n".join(f'<li class="note-item">{html.escape(n)}</li>' for n in notes)
     return f"""
   <div class="section-label">Notes</div>
   <div class="note-items">
@@ -154,13 +163,19 @@ def main():
                         help="Path to to html file for the dashboard")
     parser.add_argument("--dashboard_data_filepath", required=True,
                         help="Path to the file containing the versions for the dashboard")
+    parser.add_argument("--broken_versions_filepath",
+                        default="workflows/gpu_operator_versions/broken_versions.json",
+                        help="Path to the file listing OCP/GPU operator version combinations "
+                             "known to be broken; matching results are hidden and a note is added")
     args = parser.parse_args()
     with open(args.dashboard_data_filepath, "r") as f:
         ocp_data = json.load(f)
     logger.info(
         f"Loaded JSON data with keys: {list(ocp_data.keys())} from {args.dashboard_data_filepath}")
 
-    html_content = generate_test_matrix(ocp_data)
+    broken_entries = load_broken_versions(args.broken_versions_filepath)
+
+    html_content = generate_test_matrix(ocp_data, broken_entries)
 
     with open(args.dashboard_html_filepath, "w", encoding="utf-8") as f:
         f.write(html_content)

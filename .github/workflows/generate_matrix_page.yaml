@@ -30,6 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DASHBOARD_OUTPUT_DIR: 'workflows/gpu_operator_dashboard/output'
+      BROKEN_VERSIONS_FILEPATH: 'workflows/gpu_operator_versions/broken_versions.json'
     steps:
       - name: Set dynamic env vars
         run: |
@@ -75,7 +76,8 @@ jobs:
           python -m workflows.gpu_operator_dashboard.fetch_ci_data \
             --pr_number "${{ steps.determine_pr.outputs.PR_NUMBER }}" \
             --baseline_data_filepath "${{ env.DASHBOARD_DATA_FILEPATH }}" \
-            --merged_data_filepath "${{ env.DASHBOARD_DATA_FILEPATH }}"
+            --merged_data_filepath "${{ env.DASHBOARD_DATA_FILEPATH }}" \
+            --broken_versions_filepath "${{ env.BROKEN_VERSIONS_FILEPATH }}"
 
       - name: Generate HTML Dashboard (only if JSON changed)
         run: |
@@ -86,7 +88,8 @@ jobs:
             cd "${{ github.workspace }}"
             python -m workflows.gpu_operator_dashboard.generate_ci_dashboard \
               --dashboard_data_filepath "${{ env.DASHBOARD_DATA_FILEPATH }}" \
-              --dashboard_html_filepath "${{ env.DASHBOARD_HTML_FILEPATH }}"
+              --dashboard_html_filepath "${{ env.DASHBOARD_HTML_FILEPATH }}" \
+              --broken_versions_filepath "${{ env.BROKEN_VERSIONS_FILEPATH }}"
           fi
 
       - name: Deploy HTML to GitHub Pages
