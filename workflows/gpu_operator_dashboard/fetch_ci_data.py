@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple, Set
 import requests
 
 from workflows.common.utils import logger
+from workflows.common.broken_versions import find_broken_entry, load_broken_versions
 
 
 OCP_FULL_VERSION = "ocp_full_version"
@@ -313,9 +314,14 @@ def process_single_build(
     return TestResult(exact_ocp, exact_gpu, status, job_url, str(timestamp))
 
 
-def process_tests_for_pr(pr_number: str, results_by_ocp: Dict[str, Dict[str, Any]]) -> None:
+def process_tests_for_pr(
+    pr_number: str,
+    results_by_ocp: Dict[str, Dict[str, Any]],
+    broken_entries: Optional[List[Dict[str, Any]]] = None,
+) -> None:
     """Retrieve and store test results for all jobs under a single PR."""
     logger.info(f"Fetching test data for PR #{pr_number}")
+    broken_entries = broken_entries or []
 
     all_finished_files = fetch_pr_files(pr_number)
 
@@ -356,6 +362,14 @@ def process_tests_for_pr(pr_number: str, results_by_ocp: Dict[str, Dict[str, Any
 
         results_by_ocp.setdefault(ocp_version, {"release_tests": [], "job_history_links": set()})
 
+        broken_entry = find_broken_entry(result.ocp_full_version, result.gpu_operator_version, broken_entries)
+        if broken_entry:
+            logger.info(
+                f"Skipping build {build_id}: OCP {result.ocp_full_version} + AMD GPU Operator "
+                f"{result.gpu_operator_version} is marked as broken ({broken_entry['reason']})"
+            )
+            continue
+
         job_history_url = f"https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/{job_name}"
         results_by_ocp[ocp_version]["job_history_links"].add(job_history_url)
 
@@ -369,7 +383,10 @@ def process_tests_for_pr(pr_number: str, results_by_ocp: Dict[str, Dict[str, Any
     logger.info(f"Processed {processed_count} builds for PR #{pr_number}")
 
 
-def process_closed_prs(results_by_ocp: Dict[str, Dict[str, List[Dict[str, Any]]]]) -> None:
+def process_closed_prs(
+    results_by_ocp: Dict[str, Dict[str, List[Dict[str, Any]]]],
+    broken_entries: Optional[List[Dict[str, Any]]] = None,
+) -> None:
     """Retrieve and store test results for all closed PRs against the main branch."""
     logger.info("Retrieving PR history...")
     url = "https://api.github.com/repos/rh-ecosystem-edge/amd-ci/pulls"
@@ -383,7 +400,7 @@ def process_closed_prs(results_by_ocp: Dict[str, Dict[str, List[Dict[str, Any]]]
     for pr in response_data:
         pr_number = str(pr["number"])
         logger.info(f"Processing PR #{pr_number}")
-        process_tests_for_pr(pr_number, results_by_ocp)
+        process_tests_for_pr(pr_number, results_by_ocp, broken_entries)
 
 
 def get_version_key(result: TestResult) -> Tuple[str, str]:
@@ -492,17 +509,23 @@ def main() -> None:
                         help="Path to the baseline data file")
     parser.add_argument("--merged_data_filepath", required=True,
                         help="Path to the updated (merged) data file")
+    parser.add_argument("--broken_versions_filepath",
+                        default="workflows/gpu_operator_versions/broken_versions.json",
+                        help="Path to the file listing OCP/GPU operator version combinations "
+                             "known to be broken; results matching these are excluded")
     args = parser.parse_args()
 
     with open(args.baseline_data_filepath, "r") as f:
         existing_results: Dict[str, Dict[str, Any]] = json.load(f)
     logger.info(f"Loaded baseline data with {len(existing_results)} OCP versions")
 
+    broken_entries = load_broken_versions(args.broken_versions_filepath)
+
     local_results: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
     if args.pr_number.lower() == "all":
-        process_closed_prs(local_results)
+        process_closed_prs(local_results, broken_entries)
     else:
-        process_tests_for_pr(args.pr_number, local_results)
+        process_tests_for_pr(args.pr_number, local_results, broken_entries)
     merge_and_save_results(
         local_results, args.merged_data_filepath, existing_results=existing_results)
 

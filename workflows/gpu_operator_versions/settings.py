@@ -5,6 +5,7 @@ class Settings:
     ignored_versions: str
     version_file_path: str
     tests_to_trigger_file_path: str
+    broken_versions_file_path: Optional[str]
     request_timeout_sec: int
     gpu_versions_to_test_count: Optional[int]
 
@@ -13,6 +14,19 @@ class Settings:
         self.version_file_path = os.getenv("VERSION_FILE_PATH")
         self.tests_to_trigger_file_path = os.getenv("TEST_TO_TRIGGER_FILE_PATH")
         self.request_timeout_sec = int(os.getenv("REQUEST_TIMEOUT_SECONDS", 30))
+
+        # BROKEN_VERSIONS_FILE_PATH: path to the manually-maintained file listing OCP/GPU
+        # operator version combinations known to be broken (skipped when generating test
+        # trigger commands). Defaults to a "broken_versions.json" file next to VERSION_FILE_PATH.
+        broken_versions_env = os.getenv("BROKEN_VERSIONS_FILE_PATH", "").strip()
+        if broken_versions_env:
+            self.broken_versions_file_path = broken_versions_env
+        elif self.version_file_path:
+            self.broken_versions_file_path = os.path.join(
+                os.path.dirname(self.version_file_path), "broken_versions.json"
+            )
+        else:
+            self.broken_versions_file_path = None
         
         # GPU_VERSIONS_TO_TEST_COUNT: Parameter to limit GPU versions for new OCP tests
         # - TEMPORARY: Default of 2 is set in the workflow YAML (test against latest 2 GPU versions)

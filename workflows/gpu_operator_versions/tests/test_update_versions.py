@@ -7,6 +7,7 @@ from workflows.gpu_operator_versions.update_versions import (
     calculate_diffs,
     version2suffix,
     create_tests_matrix,
+    filter_broken_tests,
 )
 
 
@@ -183,6 +184,58 @@ class TestCreateTestsMatrix(unittest.TestCase):
         diff = {'ocp': {'4.20': '4.20.0'}}
         tests = create_tests_matrix(diff, ['4.20'], [])
         self.assertEqual(tests, set())
+
+
+class TestFilterBrokenTests(unittest.TestCase):
+    """Test cases for filter_broken_tests function.
+
+    Candidate (ocp_version, gpu_version) pairs are minor versions; they get resolved to their
+    known full patch version (via ocp_versions/gpu_versions) before being matched against
+    broken entries.
+    """
+
+    def setUp(self):
+        self.ocp_versions = {'4.20': '4.20.30', '4.21': '4.21.25'}
+        self.gpu_versions = {'1.4': '1.4.1', '1.5': '1.5.0'}
+
+    def test_no_broken_entries_returns_all_tests(self):
+        tests = {('4.20', '1.4'), ('4.21', '1.5')}
+        result = filter_broken_tests(tests, self.ocp_versions, self.gpu_versions, [])
+        self.assertEqual(result, tests)
+
+    def test_exact_combo_is_filtered_out(self):
+        tests = {('4.21', '1.4'), ('4.20', '1.4')}
+        broken = [{'ocp_version': '4.21', 'gpu_operator_version': '1.4.1', 'reason': 'known bug'}]
+        result = filter_broken_tests(tests, self.ocp_versions, self.gpu_versions, broken)
+        self.assertEqual(result, {('4.20', '1.4')})
+
+    def test_patch_level_ban_stops_matching_after_version_bump(self):
+        """A ban on gpu 1.4.1 no longer applies once versions.json advances to 1.4.2."""
+        tests = {('4.21', '1.4')}
+        broken = [{'gpu_operator_version': '1.4.1', 'reason': 'old patch was broken'}]
+        ocp_versions = {'4.21': '4.21.25'}
+        gpu_versions_updated = {'1.4': '1.4.2'}
+        result = filter_broken_tests(tests, ocp_versions, gpu_versions_updated, broken)
+        self.assertEqual(result, {('4.21', '1.4')})
+
+    def test_minor_level_ban_persists_across_patch_bumps(self):
+        tests = {('4.21', '1.4')}
+        broken = [{'gpu_operator_version': '1.4', 'reason': 'entire minor line is broken'}]
+        gpu_versions_updated = {'1.4': '1.4.2'}
+        result = filter_broken_tests(tests, self.ocp_versions, gpu_versions_updated, broken)
+        self.assertEqual(result, set())
+
+    def test_gpu_only_wildcard_filters_all_ocp_versions(self):
+        tests = {('4.20', '1.4'), ('4.21', '1.4')}
+        broken = [{'gpu_operator_version': '1.4', 'reason': 'broken everywhere'}]
+        result = filter_broken_tests(tests, self.ocp_versions, self.gpu_versions, broken)
+        self.assertEqual(result, set())
+
+    def test_ocp_only_wildcard_filters_all_gpu_versions(self):
+        tests = {('4.21', '1.4'), ('4.21', '1.5')}
+        broken = [{'ocp_version': '4.21', 'reason': 'broken everywhere'}]
+        result = filter_broken_tests(tests, self.ocp_versions, self.gpu_versions, broken)
+        self.assertEqual(result, set())
 
 
 if __name__ == '__main__':

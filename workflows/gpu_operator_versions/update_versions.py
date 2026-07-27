@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 import json
+from typing import Dict, List, Optional, Set, Tuple
 from workflows.common.utils import logger
+from workflows.common.broken_versions import find_broken_entry, load_broken_versions
 
 from workflows.gpu_operator_versions.settings import Settings
 from workflows.gpu_operator_versions.openshift import fetch_ocp_versions
@@ -61,20 +63,73 @@ def create_tests_matrix(diffs: dict, ocp_releases: list, gpu_releases: list) -> 
     return tests
 
 
-def create_tests_commands(diffs: dict, ocp_releases: list, gpu_releases: list) -> set:
+def filter_broken_tests(
+    tests: Set[Tuple[str, str]],
+    ocp_versions: Dict[str, str],
+    gpu_versions: Dict[str, str],
+    broken_entries: List[dict],
+) -> Set[Tuple[str, str]]:
     """
-    Create test commands from the test matrix.
+    Filter out (ocp_version, gpu_version) pairs that match a broken version entry.
+
+    Each minor version is resolved to its known full patch version (e.g. "4.21" -> "4.21.25")
+    before matching, so a patch-specific broken entry automatically stops applying once that
+    minor line advances to a newer, non-broken patch. Minor/major-level broken entries persist
+    across patch bumps since they don't depend on the resolved patch.
+
+    Args:
+        tests: Set of (ocp_version, gpu_version) minor-version tuples to filter
+        ocp_versions: Mapping of OCP minor version to its known full patch version
+        gpu_versions: Mapping of GPU operator minor version to its known full patch version
+        broken_entries: Broken version entries loaded from broken_versions.json
+
+    Returns:
+        set: The subset of tests that are not known to be broken
+    """
+    if not broken_entries:
+        return tests
+
+    filtered = set()
+    for ocp_version, gpu_version in tests:
+        ocp_full = ocp_versions.get(ocp_version, ocp_version)
+        gpu_full = gpu_versions.get(gpu_version, gpu_version)
+        entry = find_broken_entry(ocp_full, gpu_full, broken_entries)
+        if entry:
+            logger.info(
+                f'Skipping test trigger for OCP {ocp_full} + AMD GPU Operator {gpu_full}: '
+                f'marked as broken ({entry["reason"]})'
+            )
+            continue
+        filtered.add((ocp_version, gpu_version))
+
+    return filtered
+
+
+def create_tests_commands(
+    diffs: dict,
+    ocp_releases: list,
+    gpu_releases: list,
+    ocp_versions: Optional[Dict[str, str]] = None,
+    gpu_versions: Optional[Dict[str, str]] = None,
+    broken_entries: Optional[List[dict]] = None,
+) -> set:
+    """
+    Create test commands from the test matrix, excluding any combos marked as broken.
     
     Args:
         diffs: Dictionary of detected changes
         ocp_releases: List of OpenShift release versions
         gpu_releases: List of GPU operator release versions to test new OCP versions against
+        ocp_versions: Mapping of OCP minor version to its known full patch version
+        gpu_versions: Mapping of GPU operator minor version to its known full patch version
+        broken_entries: Broken version entries loaded from broken_versions.json
         
     Returns:
         set: Set of test command strings
     """
     tests_commands = set()
     tests = create_tests_matrix(diffs, ocp_releases, gpu_releases)
+    tests = filter_broken_tests(tests, ocp_versions or {}, gpu_versions or {}, broken_entries or [])
     for t in tests:
         gpu_version_suffix = version2suffix(t[1])
         tests_commands.add(test_command_template.format(ocp_version=t[0], gpu_version=gpu_version_suffix))
@@ -177,7 +232,11 @@ def main():
     
     logger.info(f'Generating tests for {len(ocp_releases)} OCP releases')
     logger.info(f'New GPU versions will be tested against all {len(ocp_releases)} OCP releases')
-    tests_commands = create_tests_commands(diffs, ocp_releases, gpu_releases_for_ocp)
+
+    broken_entries = load_broken_versions(settings.broken_versions_file_path)
+    tests_commands = create_tests_commands(
+        diffs, ocp_releases, gpu_releases_for_ocp, ocp_versions, gpu_versions, broken_entries
+    )
     
     logger.info(f'Generated {len(tests_commands)} test commands')
     save_tests_commands(tests_commands, settings.tests_to_trigger_file_path)
