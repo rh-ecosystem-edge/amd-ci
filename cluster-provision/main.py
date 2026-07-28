@@ -93,7 +93,7 @@ def _list_cached_clusters(host: str, user: str, base_name: str) -> list[str]:
 
     Finds VMs matching ``{base_name}-<digits>-ctlplane-0`` and returns
     the cluster name portion (e.g. ``["ocp-420", "ocp-421", "ocp-422"]``),
-    sorted alphabetically (oldest version first in typical usage).
+    sorted numerically by version suffix (oldest first).
 
     Ignores the legacy base-name cluster (e.g. ``ocp-ctlplane-0``) since
     it was created before multi-version caching.
@@ -112,7 +112,7 @@ def _list_cached_clusters(host: str, user: str, base_name: str) -> list[str]:
             cluster = vm.rsplit("-ctlplane-", 1)[0]
             if cluster != base_name:
                 clusters.add(cluster)
-    return sorted(clusters)
+    return sorted(clusters, key=lambda c: int(c[len(prefix):] or "0"))
 
 
 
