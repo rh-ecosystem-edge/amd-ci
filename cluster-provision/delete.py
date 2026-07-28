@@ -70,8 +70,9 @@ def _delete_remote(
     print(f"Remote host: {remote_user}@{remote_host}")
     
     # Check SSH connectivity first
-    if not check_ssh_connectivity(remote_host, remote_user):
-        print(f"WARNING: Cannot connect to {remote_user}@{remote_host} via SSH")
+    ssh_ok, ssh_error = check_ssh_connectivity(remote_host, remote_user)
+    if not ssh_ok:
+        print(f"WARNING: Cannot connect to {remote_user}@{remote_host} via SSH ({ssh_error})")
         print("Attempting to delete using existing kcli configuration...")
     
     # Get or create kcli client
