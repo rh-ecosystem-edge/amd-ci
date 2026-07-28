@@ -50,3 +50,4 @@ operators:
   machine_config_role: worker   # use "master" for Single Node OpenShift (SNO)
   driver_version: "31.30"
   enable_metrics: true
+  enable_dra: false

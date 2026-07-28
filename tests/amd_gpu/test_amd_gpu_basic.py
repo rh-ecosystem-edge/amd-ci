@@ -169,6 +169,7 @@ class TestDeviceConfig:
 # ============================================================================
 
 
+@pytest.mark.usefixtures("require_device_plugin")
 class TestNodeLabeller:
     """Verify Node Labeller pods and GPU metadata labels."""
 
@@ -255,6 +256,7 @@ class TestNodeLabeller:
 # ============================================================================
 
 
+@pytest.mark.usefixtures("require_device_plugin")
 class TestDevicePlugin:
     """Verify Device Plugin pods and GPU resource reporting."""
 
@@ -325,6 +327,7 @@ class TestDevicePlugin:
 # ============================================================================
 
 
+@pytest.mark.usefixtures("require_device_plugin")
 class TestROCmValidation:
     """Verify GPU detection and information via ROCm tools."""
 

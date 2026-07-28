@@ -373,6 +373,7 @@ def install_gpu_operator(
         oc,
         driver_version=cfg.driver_version,
         enable_metrics=cfg.enable_metrics,
+        enable_dra=cfg.enable_dra,
         api_version=api_version,
     )
     enable_cluster_monitoring(oc)

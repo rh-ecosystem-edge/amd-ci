@@ -166,6 +166,7 @@ def create_device_config(
     driver_version: str = DEFAULT_DRIVER_VERSION,
     driver_image: str | None = None,
     enable_metrics: bool = True,
+    enable_dra: bool = False,
     api_version: str = "amd.com/v1alpha1",
 ) -> None:
     """
@@ -186,6 +187,8 @@ def create_device_config(
         attachMetadata:
           node: true
 """
+    plugin_enabled = str(not enable_dra).lower()
+    dra_block = "\n  draDriver:\n    enable: true" if enable_dra else ""
     yaml = f"""apiVersion: {api_version}
 kind: DeviceConfig
 metadata:
@@ -197,9 +200,10 @@ spec:
     image: {image}
     version: "{driver_version}"
   devicePlugin:
-    enableNodeLabeller: true
+    enableDevicePlugin: {plugin_enabled}
+    enableNodeLabeller: {plugin_enabled}
   selector:
-    {AMD_GPU_LABEL}: "true"
+    {AMD_GPU_LABEL}: "true"{dra_block}
 {metrics_block}
 """
     oc.apply_yaml(yaml)
