@@ -153,7 +153,8 @@ def extract_build_components(path: str) -> Tuple[str, str, str, str]:
 def filter_e2e_finished_files(all_finished_files: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[Tuple[str, str, str], Dict[str, Dict[str, Any]]]]:
     """Filter AMD GPU operator E2E finished.json files, preferring nested when available.
 
-    Nested path: artifacts/e2e-amd-ci/amd-gpu-operator-test/finished.json
+    Nested path: artifacts/e2e-amd-ci[-<gpu-version-suffix>]/amd-gpu-operator-test/finished.json
+      (e.g. artifacts/e2e-amd-ci-1-3-x/amd-gpu-operator-test/finished.json)
     Top-level: <build_id>/finished.json (no /artifacts/ in path)
     """
     preferred_files = {}
@@ -165,7 +166,7 @@ def filter_e2e_finished_files(all_finished_files: List[Dict[str, Any]]) -> Tuple
         if not ("e2e-amd-ci" in path and path.endswith('/finished.json')):
             continue
 
-        is_nested = '/artifacts/e2e-amd-ci/amd-gpu-operator-test/finished.json' in path
+        is_nested = bool(re.search(r'/artifacts/e2e-amd-ci[^/]*/amd-gpu-operator-test/finished\.json$', path))
         is_top_level = not is_nested and '/artifacts/' not in path
 
         if not (is_nested or is_top_level):
@@ -390,17 +391,22 @@ def process_closed_prs(
     """Retrieve and store test results for all closed PRs against the main branch."""
     logger.info("Retrieving PR history...")
     url = "https://api.github.com/repos/rh-ecosystem-edge/amd-ci/pulls"
-    params = {"state": "closed", "base": "main",
-              "per_page": "100", "page": "1"}
     headers = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28"
     }
-    response_data = http_get_json(url, params=params, headers=headers)
-    for pr in response_data:
-        pr_number = str(pr["number"])
-        logger.info(f"Processing PR #{pr_number}")
-        process_tests_for_pr(pr_number, results_by_ocp, broken_entries)
+    page = 1
+    while True:
+        params = {"state": "closed", "base": "main",
+                  "per_page": "100", "page": str(page)}
+        response_data = http_get_json(url, params=params, headers=headers)
+        if not response_data:
+            break
+        for pr in response_data:
+            pr_number = str(pr["number"])
+            logger.info(f"Processing PR #{pr_number}")
+            process_tests_for_pr(pr_number, results_by_ocp, broken_entries)
+        page += 1
 
 
 def get_version_key(result: TestResult) -> Tuple[str, str]:
