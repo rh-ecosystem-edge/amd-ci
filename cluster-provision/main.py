@@ -110,9 +110,9 @@ def _list_cached_clusters(host: str, user: str, base_name: str) -> list[str]:
         vm = line.strip()
         if vm.startswith(prefix) and "-ctlplane-" in vm:
             cluster = vm.rsplit("-ctlplane-", 1)[0]
-            if cluster != base_name:
+            if cluster != base_name and cluster[len(prefix):].isdigit():
                 clusters.add(cluster)
-    return sorted(clusters, key=lambda c: int(c[len(prefix):] or "0"))
+    return sorted(clusters, key=lambda c: int(c[len(prefix):]))
 
 
 
