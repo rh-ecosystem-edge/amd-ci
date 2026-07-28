@@ -323,7 +323,8 @@ def deploy_remote(
                 print("\nkcli output:")
                 print(stdout)
             except Exception:
-                pass
+                kcli_process.kill()
+                kcli_process.communicate()
             raise DeployError("Timeout waiting for VMs to be deployed (10 minutes)")
         
         if elapsed % 30 == 0 or vm_count > 0:
