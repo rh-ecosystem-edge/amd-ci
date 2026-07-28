@@ -367,8 +367,8 @@ class TestROCmValidation:
         assert "gfx" in output, (
             "Expected GPU architecture string 'gfx' in rocminfo output"
         )
-        assert re.search(r"GPU|Agent\s+\d+", output), (
-            "Expected GPU/Agent info in rocminfo output"
+        assert re.search(r"Agent\s+\d+", output), (
+            "Expected Agent info (e.g. 'Agent 1') in rocminfo output"
         )
         assert "AMD" in output, (
             "Expected 'AMD' vendor string in rocminfo output"
