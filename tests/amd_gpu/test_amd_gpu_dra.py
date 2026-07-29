@@ -151,6 +151,7 @@ class TestDRAAllocation:
         k8s_custom_api: client.CustomObjectsApi,
         amd_gpu_nodes: list,
     ) -> None:
+        # resource.k8s.io/v1 with the 'exactly' wrapper requires OCP 4.21+ (K8s 1.34+).
         claim_manifest = {
             "apiVersion": f"{DRA_RESOURCE_GROUP}/{DRA_RESOURCE_VERSION}",
             "kind": "ResourceClaim",
@@ -189,10 +190,6 @@ class TestDRAAllocation:
                     "imagePullPolicy": "IfNotPresent",
                     "command": ["rocminfo"],
                     "resources": {"claims": [{"name": "gpu"}]},
-                    "securityContext": {
-                        "privileged": True,
-                        "allowPrivilegeEscalation": True,
-                    },
                 }],
             },
         }

@@ -67,6 +67,8 @@ class OperatorInstallConfig:
     gpu_ready_timeout: int = 1800
     # use_source_image - Set the useSourceImage under 'spec.driver' in the DeviceConfig CR to true/false
     use_source_image: bool | None = None
+    # enable_dra - Enable DRA driver and disable device plugin (mutually exclusive per AMD docs)
+    enable_dra: bool = False
 
 
 def wait_for_cluster_stability(

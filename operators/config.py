@@ -188,8 +188,12 @@ def create_device_config(
         attachMetadata:
           node: true
 """
-    plugin_enabled = str(not enable_dra).lower()
-    dra_block = "\n  draDriver:\n    enable: true" if enable_dra else ""
+    if enable_dra:
+        device_plugin_block = "  devicePlugin:\n    enableDevicePlugin: false\n    enableNodeLabeller: false"
+        dra_block = "\n  draDriver:\n    enable: true"
+    else:
+        device_plugin_block = "  devicePlugin:\n    enableNodeLabeller: true"
+        dra_block = ""
     yaml = f"""apiVersion: {api_version}
 kind: DeviceConfig
 metadata:
@@ -202,9 +206,7 @@ spec:
     version: "{driver_version}"
     {"useSourceImage: " + str(use_source_image).lower()
       if use_source_image is not None else ''}
-  devicePlugin:
-    enableDevicePlugin: {plugin_enabled}
-    enableNodeLabeller: {plugin_enabled}
+{device_plugin_block}
   selector:
     {AMD_GPU_LABEL}: "true"{dra_block}
 {metrics_block}

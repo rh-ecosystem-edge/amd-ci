@@ -383,6 +383,7 @@ _LABEL_POLL_INTERVAL = 5
 _LABEL_ABSENT_TIMEOUT = 120
 
 
+@pytest.mark.usefixtures("require_device_plugin")
 class TestComponentCleanup:
     """Verify that disabling a DeviceConfig component removes its pods and
     associated resources, then restore the original configuration.

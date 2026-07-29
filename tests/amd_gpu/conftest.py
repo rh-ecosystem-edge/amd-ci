@@ -60,6 +60,13 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 @pytest.fixture(scope="session")
 def load_kubeconfig():
+    """Load Kubernetes configuration once per session.
+
+    When ``KUBECONFIG`` is set explicitly, honour it even when running
+    inside a cluster so that tests target the intended cluster (e.g. a
+    remote GPU cluster reached via an SSH tunnel) rather than the CI
+    build cluster.
+    """
     kubeconfig_env = os.environ.get("KUBECONFIG")
     if kubeconfig_env:
         try:
@@ -123,6 +130,7 @@ def initial_gpu_mode(k8s_core_api: client.CoreV1Api) -> str:
 
 def _switch_to_dra(core_api: client.CoreV1Api, custom_api: client.CustomObjectsApi) -> None:
     logger.info("Switching to DRA mode...")
+    _session_mode[0] = "switching"
     patch_device_config(custom_api, {"spec": {
         "devicePlugin": {"enableDevicePlugin": False, "enableNodeLabeller": False},
         "draDriver": {"enable": True},
@@ -154,6 +162,7 @@ def _wait_for_gpu_capacity(core_api: client.CoreV1Api, timeout: int = _MODE_SWIT
 
 def _switch_to_device_plugin(core_api: client.CoreV1Api, custom_api: client.CustomObjectsApi) -> None:
     logger.info("Switching to device-plugin mode...")
+    _session_mode[0] = "switching"
     patch_device_config(custom_api, {"spec": {
         "devicePlugin": {"enableDevicePlugin": True, "enableNodeLabeller": True},
         "draDriver": {"enable": False},
@@ -173,14 +182,27 @@ def _switch_to_device_plugin(core_api: client.CoreV1Api, custom_api: client.Cust
 # ---------------------------------------------------------------------------
 
 
+def _current_mode(core_api: client.CoreV1Api) -> str:
+    """Re-probe the cluster to get the actual current mode."""
+    pods = core_api.list_namespaced_pod(NAMESPACE_AMD_GPU).items
+    dra_running = any(
+        p.metadata.name.startswith(DRA_DRIVER_PREFIX) and p.status.phase == "Running"
+        for p in pods
+    )
+    return "dra" if dra_running else "device-plugin"
+
+
 @pytest.fixture(scope="class")
 def require_dra(
     initial_gpu_mode: str,
     k8s_core_api: client.CoreV1Api,
     k8s_custom_api: client.CustomObjectsApi,
 ) -> None:
-    if _session_mode[0] != "dra":
+    if _session_mode[0] in ("switching", "device-plugin"):
         _switch_to_dra(k8s_core_api, k8s_custom_api)
+    elif _session_mode[0] == "unknown":
+        if _current_mode(k8s_core_api) != "dra":
+            _switch_to_dra(k8s_core_api, k8s_custom_api)
 
 
 @pytest.fixture(scope="class")
@@ -189,5 +211,8 @@ def require_device_plugin(
     k8s_core_api: client.CoreV1Api,
     k8s_custom_api: client.CustomObjectsApi,
 ) -> None:
-    if _session_mode[0] != "device-plugin":
+    if _session_mode[0] in ("switching", "dra"):
         _switch_to_device_plugin(k8s_core_api, k8s_custom_api)
+    elif _session_mode[0] == "unknown":
+        if _current_mode(k8s_core_api) != "device-plugin":
+            _switch_to_device_plugin(k8s_core_api, k8s_custom_api)
