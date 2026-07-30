@@ -9,6 +9,8 @@ Tests cover three layers:
 from __future__ import annotations
 
 import logging
+import re
+import time
 
 import pytest
 from kubernetes import client
@@ -24,6 +26,7 @@ from tests.amd_gpu.constants import (
     ROCM_TEST_IMAGE,
 )
 from tests.amd_gpu.helpers import (
+    _decode_k8s_response,
     delete_pod_if_exists,
     wait_for_pod_done,
     wait_for_pods_running_by_prefix,
@@ -144,6 +147,26 @@ class TestDRAAllocation:
         except ApiException as exc:
             if exc.status != 404:
                 raise
+        # Wait for the ResourceClaim to be fully gone — the DRA controller removes
+        # the delete-protection finalizer asynchronously, so a new claim with the
+        # same name could race against the still-terminating object.
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            try:
+                custom_api.get_namespaced_custom_object(
+                    DRA_RESOURCE_GROUP,
+                    DRA_RESOURCE_VERSION,
+                    _DRA_TEST_NS,
+                    "resourceclaims",
+                    _DRA_CLAIM_NAME,
+                )
+            except ApiException as exc:
+                if exc.status == 404:
+                    return
+                raise
+            logger.debug("Waiting for ResourceClaim %s to be fully deleted", _DRA_CLAIM_NAME)
+            time.sleep(2)
+        logger.warning("ResourceClaim %s still present after 30s", _DRA_CLAIM_NAME)
 
     def test_gpu_allocation_via_claim(
         self,
@@ -199,7 +222,9 @@ class TestDRAAllocation:
         phase = wait_for_pod_done(
             k8s_core_api, _DRA_POD_NAME, _DRA_TEST_NS, timeout=300
         )
-        logs = k8s_core_api.read_namespaced_pod_log(_DRA_POD_NAME, _DRA_TEST_NS)
+        logs = _decode_k8s_response(
+            k8s_core_api.read_namespaced_pod_log(_DRA_POD_NAME, _DRA_TEST_NS)
+        )
         logger.info(
             "DRA test pod finished: phase=%s\nrocminfo output (first 800 chars):\n%s",
             phase,
@@ -209,7 +234,7 @@ class TestDRAAllocation:
         assert phase == "Succeeded", (
             f"DRA GPU test pod failed (phase={phase}). Logs:\n{logs}"
         )
-        assert "Device Type:             GPU" in logs, (
+        assert re.search(r"Device Type:\s+GPU", logs), (
             "rocminfo did not report any GPU HSA agent — GPU may not have been "
             f"injected into the container via DRA. Logs:\n{logs}"
         )

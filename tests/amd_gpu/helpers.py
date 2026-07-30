@@ -21,9 +21,12 @@ def _decode_k8s_response(data: object) -> str:
         return data.decode("utf-8", errors="replace")
     if isinstance(data, str) and len(data) >= 2 and data[0] == "b" and data[1] in ("'", '"'):
         try:
-            return ast.literal_eval(data).decode("utf-8", errors="replace")
-        except Exception:
-            pass
+            parsed = ast.literal_eval(data)
+        except (SyntaxError, ValueError):
+            return data
+        if isinstance(parsed, bytes):
+            return parsed.decode("utf-8", errors="replace")
+        return data
     return str(data) if not isinstance(data, str) else data
 
 from tests.amd_gpu.constants import (

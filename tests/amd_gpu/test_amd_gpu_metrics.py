@@ -184,9 +184,15 @@ class TestMetricsExporter:
                     path="metrics",
                 )
             except ApiException as exc:
-                pytest.skip(
+                if exc.status == 503:
+                    logger.debug(
+                        "Metrics endpoint not ready yet (503); retrying in 10s"
+                    )
+                    time.sleep(10)
+                    continue
+                pytest.fail(
                     f"Cannot reach /metrics on service '{svc_name}': "
-                    f"HTTP {exc.status} — skipping metric content checks"
+                    f"HTTP {exc.status} — {exc.reason}"
                 )
             body_str = _decode_k8s_response(body)
             metric_names = {
