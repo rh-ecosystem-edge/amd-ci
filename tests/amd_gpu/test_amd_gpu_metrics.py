@@ -22,6 +22,7 @@ from tests.amd_gpu.constants import (
     METRICS_EXPORTER_PREFIX,
     NAMESPACE_AMD_GPU,
 )
+from tests.amd_gpu.helpers import _decode_k8s_response
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ pytestmark = pytest.mark.amd_gpu
 # ============================================================================
 
 
+@pytest.mark.usefixtures("require_device_plugin")
 class TestMetricsExporter:
     """Verify the AMD GPU metrics exporter is operational."""
 
@@ -145,8 +147,9 @@ class TestMetricsExporter:
                 f"{last_exc.reason if last_exc else 'unknown'}"
             )
 
-        assert body, f"Empty response from '{svc_name}/metrics'"
-        assert "# HELP" in body or "# TYPE" in body, (
+        body_str = _decode_k8s_response(body)
+        assert body_str, f"Empty response from '{svc_name}/metrics'"
+        assert "# HELP" in body_str or "# TYPE" in body_str, (
             f"Response from '{svc_name}/metrics' is not valid Prometheus format"
         )
         logger.info(
@@ -169,27 +172,36 @@ class TestMetricsExporter:
         port = svc.spec.ports[0].port if svc.spec.ports else None
         proxy_name = f"{svc_name}:{port}" if port else svc_name
 
-        try:
-            body = k8s_core_api.connect_get_namespaced_service_proxy_with_path(
-                name=proxy_name,
-                namespace=NAMESPACE_AMD_GPU,
-                path="metrics",
-            )
-        except ApiException as exc:
-            pytest.skip(
-                f"Cannot reach /metrics on service '{svc_name}': "
-                f"HTTP {exc.status} — skipping metric content checks"
-            )
+        # GPU metrics may take up to 90s to appear after the exporter starts/restarts.
+        deadline = time.monotonic() + 90
+        missing: list[str] = list(EXPECTED_METRICS)
+        body = ""
+        while time.monotonic() < deadline:
+            try:
+                body = k8s_core_api.connect_get_namespaced_service_proxy_with_path(
+                    name=proxy_name,
+                    namespace=NAMESPACE_AMD_GPU,
+                    path="metrics",
+                )
+            except ApiException as exc:
+                pytest.skip(
+                    f"Cannot reach /metrics on service '{svc_name}': "
+                    f"HTTP {exc.status} — skipping metric content checks"
+                )
+            body_str = _decode_k8s_response(body)
+            metric_names = {
+                line.split("{", 1)[0].split()[0]
+                for line in body_str.splitlines()
+                if line and not line.startswith("#")
+            }
+            missing = [m for m in EXPECTED_METRICS if m not in metric_names]
+            if not missing:
+                break
+            logger.debug("Waiting for GPU metrics to populate: still missing %s", missing)
+            time.sleep(10)
 
-        metric_names = {
-            line.split("{", 1)[0].split()[0]
-            for line in body.splitlines()
-            if line and not line.startswith("#")
-        }
-        missing = [m for m in EXPECTED_METRICS if m not in metric_names]
         assert not missing, (
             f"The following expected metrics were not found in /metrics output: {missing}"
         )
-
         for metric in EXPECTED_METRICS:
             logger.info("Confirmed expected metric present: %s", metric)
