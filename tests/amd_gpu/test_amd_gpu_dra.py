@@ -166,7 +166,9 @@ class TestDRAAllocation:
                 raise
             logger.debug("Waiting for ResourceClaim %s to be fully deleted", _DRA_CLAIM_NAME)
             time.sleep(2)
-        logger.warning("ResourceClaim %s still present after 30s", _DRA_CLAIM_NAME)
+        raise TimeoutError(
+            f"ResourceClaim {_DRA_TEST_NS}/{_DRA_CLAIM_NAME} was not deleted within 30s"
+        )
 
     def test_gpu_allocation_via_claim(
         self,
