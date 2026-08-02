@@ -188,12 +188,13 @@ def create_device_config(
         attachMetadata:
           node: true
 """
+    # Only emit devicePlugin / draDriver overrides when DRA is explicitly enabled.
+    # When enable_dra is False, rely on the DeviceConfig CRD defaults.
+    device_plugin_block = ""
+    dra_block = ""
     if enable_dra:
         device_plugin_block = "  devicePlugin:\n    enableDevicePlugin: false\n    enableNodeLabeller: false"
-        dra_block = "\n  draDriver:\n    enable: true"
-    else:
-        device_plugin_block = "  devicePlugin:\n    enableNodeLabeller: true"
-        dra_block = ""
+        dra_block = "  draDriver:\n    enable: true"
     yaml = f"""apiVersion: {api_version}
 kind: DeviceConfig
 metadata:
@@ -208,7 +209,8 @@ spec:
       if use_source_image is not None else ''}
 {device_plugin_block}
   selector:
-    {AMD_GPU_LABEL}: "true"{dra_block}
+    {AMD_GPU_LABEL}: "true"
+{dra_block}
 {metrics_block}
 """
     oc.apply_yaml(yaml)

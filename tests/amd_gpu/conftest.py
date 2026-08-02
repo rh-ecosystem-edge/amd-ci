@@ -102,6 +102,11 @@ def k8s_custom_api(load_kubeconfig) -> client.CustomObjectsApi:
 
 @pytest.fixture(scope="session")
 def amd_gpu_nodes(k8s_core_api: client.CoreV1Api) -> list[client.V1Node]:
+    """Return all cluster nodes that carry the AMD GPU NFD label.
+
+    Skips the entire session if no such nodes are found so that individual
+    tests do not need to repeat the guard.
+    """
     nodes = k8s_core_api.list_node(label_selector=f"{NFD_LABEL_KEY}={NFD_LABEL_VALUE}")
     if not nodes.items:
         pytest.skip("No AMD GPU nodes found in cluster")

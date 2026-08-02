@@ -222,7 +222,7 @@ def wait_for_gpu_ready(
 def wait_for_dra_ready(
     oc: OcRunner,
     timeout: int = 900,
-    poll_interval: int = 30,
+    poll_interval: int = 10,
 ) -> None:
     """Wait for the DRA driver to be ready after DeviceConfig creation.
 
@@ -256,7 +256,8 @@ def wait_for_dra_ready(
             return
 
         print(
-            f"  DRA driver pods: {len(dra_pods)}, ResourceSlices: {len(slices)} ({elapsed}s)..."
+            f"  DRA driver pods: {len(dra_pods)}, ResourceSlices: {len(slices)} "
+            f"({elapsed}s elapsed — trying again in {poll_interval}s)..."
         )
         time.sleep(poll_interval)
 
