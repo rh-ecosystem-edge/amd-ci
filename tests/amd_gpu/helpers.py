@@ -9,8 +9,24 @@ import time
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
+from tests.amd_gpu.constants import (
+    DEVICECONFIG_GROUP,
+    DEVICECONFIG_NAME,
+    DEVICECONFIG_PLURAL,
+    DEVICECONFIG_VERSION,
+    GPU_RESOURCE_NAME,
+    NAMESPACE_AMD_GPU,
+    POD_COMPLETION_POLL_INTERVAL,
+    POD_COMPLETION_TIMEOUT,
+    POD_DELETION_POLL_INTERVAL,
+    POD_DELETION_TIMEOUT,
+    ROCM_TEST_IMAGE,
+)
 
-def _decode_k8s_response(data: object) -> str:
+logger = logging.getLogger(__name__)
+
+
+def decode_k8s_response(data: object) -> str:
     """Normalize a kubernetes API response to a plain str.
 
     The Python kubernetes client may return actual bytes, or (in some versions)
@@ -28,22 +44,6 @@ def _decode_k8s_response(data: object) -> str:
             return parsed.decode("utf-8", errors="replace")
         return data
     return str(data) if not isinstance(data, str) else data
-
-from tests.amd_gpu.constants import (
-    DEVICECONFIG_GROUP,
-    DEVICECONFIG_NAME,
-    DEVICECONFIG_PLURAL,
-    DEVICECONFIG_VERSION,
-    GPU_RESOURCE_NAME,
-    NAMESPACE_AMD_GPU,
-    POD_COMPLETION_POLL_INTERVAL,
-    POD_COMPLETION_TIMEOUT,
-    POD_DELETION_POLL_INTERVAL,
-    POD_DELETION_TIMEOUT,
-    ROCM_TEST_IMAGE,
-)
-
-logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +307,7 @@ def run_gpu_command(
 
         phase = wait_for_pod_done(core_api, pod_name, namespace, timeout)
         raw_logs = core_api.read_namespaced_pod_log(pod_name, namespace)
-        logs = _decode_k8s_response(raw_logs)
+        logs = decode_k8s_response(raw_logs)
         logger.info("Pod %s finished with phase %s", pod_name, phase)
 
         assert phase == "Succeeded", (

@@ -26,7 +26,7 @@ from tests.amd_gpu.constants import (
     ROCM_TEST_IMAGE,
 )
 from tests.amd_gpu.helpers import (
-    _decode_k8s_response,
+    decode_k8s_response,
     delete_pod_if_exists,
     wait_for_pod_done,
     wait_for_pods_running_by_prefix,
@@ -224,7 +224,7 @@ class TestDRAAllocation:
         phase = wait_for_pod_done(
             k8s_core_api, _DRA_POD_NAME, _DRA_TEST_NS, timeout=300
         )
-        logs = _decode_k8s_response(
+        logs = decode_k8s_response(
             k8s_core_api.read_namespaced_pod_log(_DRA_POD_NAME, _DRA_TEST_NS)
         )
         logger.info(

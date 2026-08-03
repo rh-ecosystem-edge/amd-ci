@@ -22,7 +22,7 @@ from tests.amd_gpu.constants import (
     METRICS_EXPORTER_PREFIX,
     NAMESPACE_AMD_GPU,
 )
-from tests.amd_gpu.helpers import _decode_k8s_response
+from tests.amd_gpu.helpers import decode_k8s_response
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +147,7 @@ class TestMetricsExporter:
                 f"{last_exc.reason if last_exc else 'unknown'}"
             )
 
-        body_str = _decode_k8s_response(body)
+        body_str = decode_k8s_response(body)
         assert body_str, f"Empty response from '{svc_name}/metrics'"
         assert "# HELP" in body_str or "# TYPE" in body_str, (
             f"Response from '{svc_name}/metrics' is not valid Prometheus format"
@@ -194,7 +194,7 @@ class TestMetricsExporter:
                     f"Cannot reach /metrics on service '{svc_name}': "
                     f"HTTP {exc.status} — {exc.reason}"
                 )
-            body_str = _decode_k8s_response(body)
+            body_str = decode_k8s_response(body)
             metric_names = {
                 line.split("{", 1)[0].split()[0]
                 for line in body_str.splitlines()
