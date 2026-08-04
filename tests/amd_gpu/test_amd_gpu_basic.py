@@ -169,7 +169,6 @@ class TestDeviceConfig:
 # ============================================================================
 
 
-@pytest.mark.usefixtures("require_device_plugin")
 class TestNodeLabeller:
     """Verify Node Labeller pods and GPU metadata labels."""
 
@@ -256,7 +255,6 @@ class TestNodeLabeller:
 # ============================================================================
 
 
-@pytest.mark.usefixtures("require_device_plugin")
 class TestDevicePlugin:
     """Verify Device Plugin pods and GPU resource reporting."""
 
@@ -327,7 +325,6 @@ class TestDevicePlugin:
 # ============================================================================
 
 
-@pytest.mark.usefixtures("require_device_plugin")
 class TestROCmValidation:
     """Verify GPU detection and information via ROCm tools."""
 
@@ -383,7 +380,6 @@ _LABEL_POLL_INTERVAL = 5
 _LABEL_ABSENT_TIMEOUT = 120
 
 
-@pytest.mark.usefixtures("require_device_plugin")
 class TestComponentCleanup:
     """Verify that disabling a DeviceConfig component removes its pods and
     associated resources, then restore the original configuration.

@@ -21,20 +21,6 @@ VERSION_CHANNEL = "stable"
 DEFAULT_MIN_FREE_SPACE_GB = 100
 
 
-def _parse_bool(data: dict, key: str, default: bool) -> bool:
-    """Parse a boolean config value, rejecting quoted strings like "false".
-
-    YAML parses unquoted ``false`` as ``False``, but ``bool("false")`` is
-    ``True``, so we reject non-bool values rather than silently misreading them.
-    """
-    value = data.get(key, default)
-    if not isinstance(value, bool):
-        raise ValueError(
-            f"Config key '{key}' must be a boolean (true/false), got {type(value).__name__}: {value!r}"
-        )
-    return value
-
-
 def _parse_min_free_space_gb(raw_value: Any) -> float:
     """Parse and validate the remote.min_free_space_gb config value.
 
@@ -89,7 +75,6 @@ class OperatorsConfig:
     driver_version: str
     enable_metrics: bool
     use_source_image: bool
-    enable_dra: bool
 
 
 @dataclass
@@ -277,7 +262,6 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
             driver_version=str(operators_data["driver_version"]),
             enable_metrics=operators_data["enable_metrics"],
             use_source_image=operators_data.get("use_source_image"),
-            enable_dra=_parse_bool(operators_data, "enable_dra", default=False),
         )
 
         snapshot_data = raw_config.get("snapshot") or {}

@@ -90,18 +90,6 @@ EXPECTED_METRICS = [
 ]
 
 # ---------------------------------------------------------------------------
-# DRA (Dynamic Resource Allocation) constants
-# ---------------------------------------------------------------------------
-DRA_RESOURCE_GROUP = "resource.k8s.io"
-DRA_RESOURCE_VERSION = os.environ.get("AMD_DRA_RESOURCE_VERSION", "v1")
-
-DRA_DEVICE_CLASS_NAME = os.environ.get("AMD_DRA_DEVICE_CLASS", "gpu.amd.com")
-DRA_DRIVER_NAME = os.environ.get("AMD_DRA_DRIVER_NAME", "gpu.amd.com")
-
-# Pod name prefix for the DRA driver DaemonSet pods
-DRA_DRIVER_PREFIX = f"{DEVICECONFIG_NAME}-dra-driver-"
-
-# ---------------------------------------------------------------------------
 # Timeouts and polling intervals (seconds)
 # ---------------------------------------------------------------------------
 POD_COMPLETION_TIMEOUT = 300

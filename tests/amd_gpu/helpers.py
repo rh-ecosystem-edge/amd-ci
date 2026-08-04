@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import logging
 import time
 
@@ -24,26 +23,6 @@ from tests.amd_gpu.constants import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def decode_k8s_response(data: object) -> str:
-    """Normalize a kubernetes API response to a plain str.
-
-    The Python kubernetes client may return actual bytes, or (in some versions)
-    str(bytes_obj) — e.g. "b'\\nline1\\nline2'" — which collapses real newlines
-    into escaped ``\\n`` and breaks any line-based parsing.
-    """
-    if isinstance(data, bytes):
-        return data.decode("utf-8", errors="replace")
-    if isinstance(data, str) and len(data) >= 2 and data[0] == "b" and data[1] in ("'", '"'):
-        try:
-            parsed = ast.literal_eval(data)
-        except (SyntaxError, ValueError):
-            return data
-        if isinstance(parsed, bytes):
-            return parsed.decode("utf-8", errors="replace")
-        return data
-    return str(data) if not isinstance(data, str) else data
 
 
 # ---------------------------------------------------------------------------
@@ -306,8 +285,7 @@ def run_gpu_command(
         logger.info("Created pod %s/%s", namespace, pod_name)
 
         phase = wait_for_pod_done(core_api, pod_name, namespace, timeout)
-        raw_logs = core_api.read_namespaced_pod_log(pod_name, namespace)
-        logs = decode_k8s_response(raw_logs)
+        logs = core_api.read_namespaced_pod_log(pod_name, namespace)
         logger.info("Pod %s finished with phase %s", pod_name, phase)
 
         assert phase == "Succeeded", (
