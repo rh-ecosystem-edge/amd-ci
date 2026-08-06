@@ -33,6 +33,7 @@ from operators.config import (
 )
 from operators.constants import NAMESPACE_AMD_GPU
 from operators.install import (
+    ensure_namespace,
     install_amd_gpu_operator,
     install_all_operators,
     install_kmm,
@@ -318,7 +319,7 @@ def install_base(
     wait_for_cluster_stability(oc, timeout=cfg.cluster_stability_timeout)
 
     create_amdgpu_blacklist(oc, role=cfg.machine_config_role)
-    wait_for_mcp_updated(oc)
+    wait_for_mcp_updated(oc, timeout=cfg.cluster_stability_timeout)
     wait_for_cluster_stability(oc, timeout=cfg.cluster_stability_timeout)
 
     install_nfd(oc, timeout=cfg.operator_timeout)
@@ -326,10 +327,7 @@ def install_base(
 
     create_nfd_instance(oc, ocp_version=cfg.ocp_version)
 
-    r = oc.oc("get", "namespace", NAMESPACE_AMD_GPU)
-    if r.returncode != 0:
-        print(f"  Creating namespace {NAMESPACE_AMD_GPU}...")
-        oc.oc("create", "namespace", NAMESPACE_AMD_GPU)
+    ensure_namespace(oc, NAMESPACE_AMD_GPU)
 
     create_nfd_feature_rule(oc)
 

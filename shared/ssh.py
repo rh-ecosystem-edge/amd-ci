@@ -96,19 +96,26 @@ def scp_cmd(
 ) -> subprocess.CompletedProcess:
     """Copy a file via SCP."""
     ssh_opts = get_ssh_opts()
-    full_cmd = f"scp {ssh_opts} {src} {dest}"
-    return subprocess.run(
-        full_cmd,
-        shell=True,
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    full_cmd = f"scp {ssh_opts} {shlex.quote(src)} {shlex.quote(dest)}"
+    try:
+        return subprocess.run(
+            full_cmd,
+            shell=True,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"  SCP timed out after {timeout}s: {src}")
+        raise
 
 
 def close_ssh_multiplexing(host: str, user: str) -> None:
     """Close the SSH ControlMaster connection for a given host."""
     ssh_opts = get_ssh_opts()
     cmd = f"ssh {ssh_opts} -O exit {user}@{host}"
-    subprocess.run(cmd, shell=True, capture_output=True, timeout=10)
+    try:
+        subprocess.run(cmd, shell=True, capture_output=True, timeout=10)
+    except subprocess.TimeoutExpired:
+        pass
