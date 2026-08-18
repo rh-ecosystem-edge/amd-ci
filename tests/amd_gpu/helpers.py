@@ -215,8 +215,14 @@ def wait_for_pods_running_by_prefix(
     min_count: int = 1,
     timeout: int = 180,
     poll_interval: int = 5,
+    ready: bool = False,
 ) -> None:
     """Block until at least *min_count* pods with *prefix* are Running.
+
+    When *ready* is True, also require all containers in each matched pod to
+    have passed their readiness probes (containerStatuses[*].ready == True).
+    Use this for DRA driver pods whose readiness probe gates on the plugin
+    socket being registered with the kubelet.
 
     Raises ``TimeoutError`` if the condition is not met within *timeout* seconds.
     """
@@ -227,11 +233,17 @@ def wait_for_pods_running_by_prefix(
             p for p in pods
             if p.metadata.name.startswith(prefix) and p.status.phase == "Running"
         ]
+        if ready:
+            running = [
+                p for p in running
+                if (p.status.container_statuses or [])
+                and all(cs.ready for cs in (p.status.container_statuses or []))
+            ]
         if len(running) >= min_count:
             return
         logger.debug(
-            "Waiting for %d Running pod(s) with prefix '%s'; found %d",
-            min_count, prefix, len(running),
+            "Waiting for %d Running%s pod(s) with prefix '%s'; found %d",
+            min_count, "+Ready" if ready else "", prefix, len(running),
         )
         time.sleep(poll_interval)
     raise TimeoutError(
