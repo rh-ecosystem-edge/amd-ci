@@ -531,18 +531,29 @@ def _current_mode(core_api: client.CoreV1Api) -> str:
 
 
 def _operator_supports_dra(custom_api: client.CustomObjectsApi) -> bool:
-    """Return True if the installed operator accepts the draDriver field.
+    """Return True if the installed operator's DeviceConfig CRD exposes draDriver.
 
-    Reads the current DeviceConfig spec and checks whether the draDriver field
-    is present. Operators older than v1.5 treat draDriver as an unknown field
-    and silently drop it, so the field will be absent from the stored spec.
+    The CRD's OpenAPI schema is the ground truth for whether the operator
+    understands the draDriver field. Reading the live DeviceConfig instead would
+    give a false negative whenever the cluster is currently in device-plugin
+    mode (draDriver is simply absent from the stored spec then), even on a v1.5+
+    operator that fully supports DRA. The draDriver field was introduced in the
+    AMD GPU Operator v1.5.0.
     """
     try:
-        dc = custom_api.get_namespaced_custom_object(
-            DEVICECONFIG_GROUP, DEVICECONFIG_VERSION,
-            NAMESPACE_AMD_GPU, DEVICECONFIG_PLURAL, DEVICECONFIG_NAME,
+        ext_api = client.ApiextensionsV1Api(custom_api.api_client)
+        crd = ext_api.read_custom_resource_definition(
+            f"{DEVICECONFIG_PLURAL}.{DEVICECONFIG_GROUP}"
         )
-        return "draDriver" in (dc.get("spec") or {})
+        for version in crd.spec.versions or []:
+            schema = getattr(version, "schema", None)
+            openapi = getattr(schema, "open_apiv3_schema", None) if schema else None
+            props = getattr(openapi, "properties", None) if openapi else None
+            spec_schema = props.get("spec") if props else None
+            spec_props = getattr(spec_schema, "properties", None) if spec_schema else None
+            if spec_props and "draDriver" in spec_props:
+                return True
+        return False
     except Exception:
         return False
 
