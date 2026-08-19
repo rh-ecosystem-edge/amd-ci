@@ -75,19 +75,15 @@ class TestResult:
     test_status: str
     prow_job_url: str
     job_timestamp: str
-    test_details: Optional[list] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        d = {
+        return {
             OCP_FULL_VERSION: self.ocp_full_version,
             GPU_OPERATOR_VERSION: self.gpu_operator_version,
             "test_status": self.test_status,
             "prow_job_url": self.prow_job_url,
             "job_timestamp": self.job_timestamp,
         }
-        if self.test_details is not None:
-            d["test_details"] = self.test_details
-        return d
 
     def build_key(self) -> Tuple[str, str, str]:
         """Get the PR number, job name and build ID for deduplication purposes."""
@@ -229,7 +225,6 @@ def build_files_lookup(
 
 
 GPU_VERSION_RESOLVED_REGEX = re.compile(r"Resolved AMD GPU Operator \S+ -> (\S+)")
-TEST_DETAIL_REGEX = re.compile(r"::(Test\w+)::(test_\w+)\s+(PASSED|FAILED|SKIPPED|ERROR)")
 
 
 def fetch_exact_ocp_version(build_base_path: str, e2e_step_name: str) -> Optional[str]:
@@ -257,25 +252,6 @@ def fetch_exact_gpu_version(build_base_path: str, e2e_step_name: str) -> Optiona
         return None
     except Exception as e:
         logger.warning(f"Could not fetch GPU operator version from {log_path}: {e}")
-        return None
-
-
-def fetch_test_details(build_base_path: str, e2e_step_name: str) -> Optional[List[Dict[str, str]]]:
-    """Parse per-test pass/fail results from the test step's build log.
-
-    Scans for pytest -v output lines of the form:
-      ::TestClass::test_method PASSED|FAILED|SKIPPED|ERROR
-    """
-    log_path = f"{build_base_path}/artifacts/{e2e_step_name}/amd-gpu-operator-test/build-log.txt"
-    try:
-        content = fetch_gcs_file_content(log_path)
-        tests = [
-            {"class": m.group(1), "name": m.group(2), "status": m.group(3)}
-            for m in TEST_DETAIL_REGEX.finditer(content)
-        ]
-        return tests if tests else None
-    except Exception as e:
-        logger.debug(f"Could not fetch test details from {log_path}: {e}")
         return None
 
 
@@ -335,8 +311,7 @@ def process_single_build(
                      f"(ocp={exact_ocp}, gpu={exact_gpu})")
         return None
 
-    test_details = fetch_test_details(build_base_path, e2e_step_name)
-    return TestResult(exact_ocp, exact_gpu, status, job_url, str(timestamp), test_details)
+    return TestResult(exact_ocp, exact_gpu, status, job_url, str(timestamp))
 
 
 def process_tests_for_pr(
