@@ -34,7 +34,6 @@ pytestmark = pytest.mark.amd_gpu
 # ============================================================================
 
 
-@pytest.mark.usefixtures("require_device_plugin")
 class TestMetricsExporter:
     """Verify the AMD GPU metrics exporter is operational."""
 
