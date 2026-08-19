@@ -1,15 +1,17 @@
   <a id="ocp-{ocp_key}"></a>
-  <div class="ocp-version-container">
-    <div class="ocp-version-header">
-      OpenShift {ocp_key}
+  <div class="ocp-section">
+    <div class="ocp-section-header">
+      <div class="ocp-section-title">OpenShift {ocp_key}</div>
+      <div>{success_badge}</div>
     </div>
     {notes}
-    <div class="section-label">From operator catalog</div>
-    <table id="table-{ocp_key}-regular">
+    <table>
       <thead>
         <tr>
-          <th>OpenShift</th>
-          <th>AMD GPU Operator</th>
+          <th style="width:130px">OCP Version</th>
+          <th style="width:160px">GPU Operator</th>
+          <th style="width:120px">Status</th>
+          <th>Test Details</th>
         </tr>
       </thead>
       <tbody>

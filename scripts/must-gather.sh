@@ -71,25 +71,6 @@ $OC get clusterversion -o yaml                  > "${GATHER_DIR}/clusterversion.
 $OC get events -A --sort-by='.lastTimestamp'    > "${GATHER_DIR}/events.txt" 2>&1 || true
 $OC get crds -o name 2>/dev/null | grep -E 'nfd|kmm|amd|gpu' > "${GATHER_DIR}/related-crds.txt" || true
 
-# --- OLM / Operator Catalog State ---------------------------------------------
-# Always collected (not gated on operator detection): Subscriptions/InstallPlans
-# exist as soon as an install is attempted, even if the operator never got far
-# enough to start a pod (e.g. a CatalogSource stuck resolving an InstallPlan).
-
-log "Collecting OLM / CatalogSource state"
-OLM_DIR="${GATHER_DIR}/olm"
-mkdir -p "${OLM_DIR}"
-
-$OC get catalogsource -n openshift-marketplace -o yaml > "${OLM_DIR}/catalogsources.yaml" 2>/dev/null || true
-$OC get catalogsource -n openshift-marketplace -o wide > "${OLM_DIR}/catalogsources.txt" 2>/dev/null || true
-$OC get subscription -A -o yaml                        > "${OLM_DIR}/subscriptions.yaml" 2>/dev/null || true
-$OC get installplan -A -o yaml                         > "${OLM_DIR}/installplans.yaml" 2>/dev/null || true
-$OC get csv -A -o wide                                 > "${OLM_DIR}/csvs.txt" 2>/dev/null || true
-$OC get pods -n openshift-marketplace -o wide          > "${OLM_DIR}/marketplace-pods.txt" 2>/dev/null || true
-
-$OC adm inspect "ns/openshift-marketplace" --dest-dir="${OLM_DIR}/inspect" 2>&1 || true
-collect_logs "openshift-marketplace" "${OLM_DIR}/marketplace-logs"
-
 # --- NFD (Node Feature Discovery) --------------------------------------------
 
 NFD_NS=$(find_ns \
@@ -165,7 +146,6 @@ fi
 
 log ""
 log "Must-gather complete: ${GATHER_DIR}"
-log "  OLM/CatalogSources → ${OLM_DIR}"
 [[ -n "${NFD_NS:-}" ]] && log "  NFD              → ${NFD_NS}"
 [[ -n "${GPU_NS:-}" ]] && log "  AMD GPU Operator → ${GPU_NS}"
 [[ -n "${KMM_NS:-}" ]] && log "  KMM              → ${KMM_NS}"

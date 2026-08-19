@@ -30,8 +30,41 @@ _TUNNEL_SSH_OPTS = (
 )
 
 
+_VALID_SUITES = ("all", "device-plugin", "dra")
+
+
+def _resolve_test_targets(test_dir: Path) -> list[str]:
+    """Return the pytest target paths based on AMD_GPU_TEST_SUITE.
+
+    AMD_GPU_TEST_SUITE values:
+      all           – run device-plugin and metrics tests (default, no DRA)
+      device-plugin – run test_amd_gpu_basic.py only
+      dra           – run test_amd_gpu_dra.py only (opt-in)
+    """
+    suite = os.environ.get("AMD_GPU_TEST_SUITE", "all").strip().lower()
+    if suite not in _VALID_SUITES:
+        print(
+            f"  Warning: unknown AMD_GPU_TEST_SUITE={suite!r}; "
+            f"valid values are {_VALID_SUITES}. Falling back to 'all'."
+        )
+        suite = "all"
+
+    if suite == "device-plugin":
+        return [str(test_dir / "test_amd_gpu_basic.py")]
+    if suite == "dra":
+        return [str(test_dir / "test_amd_gpu_dra.py")]
+    # "all" explicitly excludes DRA — DRA requires opt-in via AMD_GPU_TEST_SUITE=dra
+    return [
+        str(test_dir / "test_amd_gpu_basic.py"),
+        str(test_dir / "test_amd_gpu_metrics.py"),
+    ]
+
+
 def run_gpu_tests(kubeconfig_path: str | Path) -> int:
     """Run AMD GPU verification tests.
+
+    Respects the AMD_GPU_TEST_SUITE env var to select which suite to run:
+      all (default), device-plugin, or dra.
 
     Returns the pytest exit code (0 = all tests passed).
     """
@@ -42,8 +75,11 @@ def run_gpu_tests(kubeconfig_path: str | Path) -> int:
         print(f"  Warning: test directory not found at {test_dir}, skipping tests.")
         return 0
 
+    suite = os.environ.get("AMD_GPU_TEST_SUITE", "all").strip().lower()
+    targets = _resolve_test_targets(test_dir)
+
     print("\n" + "=" * 60)
-    print("Running AMD GPU Verification Tests")
+    print(f"Running AMD GPU Verification Tests (suite={suite})")
     print("=" * 60)
 
     env = {
@@ -53,7 +89,8 @@ def run_gpu_tests(kubeconfig_path: str | Path) -> int:
     }
 
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", str(test_dir), "-v"],
+        [sys.executable, "-m", "pytest", *targets, "-v",
+         "--log-cli-level=INFO", "--log-cli-format=%(asctime)s %(levelname)s %(message)s"],
         env=env,
         cwd=str(repo_root),
     )
