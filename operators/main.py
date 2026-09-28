@@ -67,6 +67,8 @@ class OperatorInstallConfig:
     gpu_ready_timeout: int = 1800
     # use_source_image - Set the useSourceImage under 'spec.driver' in the DeviceConfig CR to true/false
     use_source_image: bool | None = None
+    # enable_dra - Enable DRA driver and disable device plugin (mutually exclusive per AMD docs)
+    enable_dra: bool = False
 
 
 def wait_for_cluster_stability(
@@ -214,6 +216,54 @@ def wait_for_gpu_ready(
     raise RuntimeError(
         f"AMD GPU resources did not become available within {timeout}s. "
         "Check KMM build pods and operator logs."
+    )
+
+
+def wait_for_dra_ready(
+    oc: OcRunner,
+    timeout: int = 900,
+    poll_interval: int = 10,
+) -> None:
+    """Wait for the DRA driver to be ready after DeviceConfig creation.
+
+    Polls until:
+    1. At least one DRA driver pod is Running.
+    2. At least one ResourceSlice is published by the gpu.amd.com driver.
+    """
+    print("Waiting for DRA driver and ResourceSlice to become available...")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        elapsed = int(timeout - (deadline - time.monotonic()))
+
+        r = oc.oc("get", "pods", "-n", NAMESPACE_AMD_GPU, "--no-headers", timeout=30)
+        dra_pods = [
+            line for line in (r.stdout or "").splitlines()
+            if "dra-driver" in line and "Running" in line
+        ] if r.returncode == 0 else []
+
+        r = oc.oc(
+            "get", "resourceslices",
+            "-o", "jsonpath={.items[?(@.spec.driver==\"gpu.amd.com\")].metadata.name}",
+            timeout=30,
+        )
+        slices = (r.stdout or "").split() if r.returncode == 0 else []
+
+        if dra_pods and slices:
+            print(
+                f"  DRA driver ready: {len(dra_pods)} pod(s), "
+                f"{len(slices)} ResourceSlice(s) published."
+            )
+            return
+
+        print(
+            f"  DRA driver pods: {len(dra_pods)}, ResourceSlices: {len(slices)} "
+            f"({elapsed}s elapsed — trying again in {poll_interval}s)..."
+        )
+        time.sleep(poll_interval)
+
+    raise RuntimeError(
+        f"DRA driver did not become ready within {timeout}s. "
+        "Check DRA driver pods and operator logs."
     )
 
 
@@ -375,13 +425,17 @@ def install_gpu_operator(
         oc,
         driver_version=cfg.driver_version,
         enable_metrics=cfg.enable_metrics,
+        enable_dra=cfg.enable_dra,
         api_version=api_version,
         use_source_image=cfg.use_source_image,
     )
     enable_cluster_monitoring(oc)
 
     wait_for_cluster_stability(oc, timeout=cfg.cluster_stability_timeout)
-    wait_for_gpu_ready(oc, timeout=cfg.gpu_ready_timeout)
+    if cfg.enable_dra:
+        wait_for_dra_ready(oc, timeout=cfg.gpu_ready_timeout)
+    else:
+        wait_for_gpu_ready(oc, timeout=cfg.gpu_ready_timeout)
 
     print("\n" + "=" * 60)
     print("AMD GPU Operator installation completed successfully.")
