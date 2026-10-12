@@ -12,7 +12,45 @@ test-gpu:
 ifdef CONFIG_FILE_PATH
 	python3 cluster-provision/main.py --config $(CONFIG_FILE_PATH) test-gpu
 else
-	PYTHONPATH=. python3 -m pytest tests/amd_gpu/ -v
+	PYTHONPATH=. python3 -m pytest tests/amd_gpu/ -v -m "not workload"
+endif
+
+# Run AMD GPU stress/workload tests (PyTorch, GPU burn, vLLM) — slow.
+# Excluded from `make test-gpu`; run explicitly. Same cluster prerequisites.
+# For local clusters:  make test-gpu-workload KUBECONFIG=~/.kcli/clusters/<name>/auth/kubeconfig
+# For remote clusters: make test-gpu-workload CONFIG_FILE_PATH=cluster-config.yaml
+# Optional env vars: AMD_PYTORCH_TEST_IMAGE, AMD_VLLM_TEST_IMAGE, AMD_VLLM_MODEL,
+#   AMD_VLLM_TEST_ENABLED, AMD_WORKLOAD_GPU_COUNT, AMD_GPU_BURN_DURATION
+test-gpu-workload:
+ifdef CONFIG_FILE_PATH
+	python3 cluster-provision/main.py --config $(CONFIG_FILE_PATH) test-gpu-workload
+else
+	PYTHONPATH=. python3 -m pytest tests/amd_gpu/ -v -m "workload"
+endif
+
+# Run an individual stress/workload test. Same prerequisites and env vars as
+# `make test-gpu-workload`; each runs only its single test.
+# For local clusters:  make test-gpu-pytorch KUBECONFIG=~/.kcli/clusters/<name>/auth/kubeconfig
+# For remote clusters: make test-gpu-pytorch CONFIG_FILE_PATH=cluster-config.yaml
+test-gpu-pytorch:
+ifdef CONFIG_FILE_PATH
+	python3 cluster-provision/main.py --config $(CONFIG_FILE_PATH) test-gpu-pytorch
+else
+	PYTHONPATH=. python3 -m pytest tests/amd_gpu/ -v -m "pytorch"
+endif
+
+test-gpu-burn:
+ifdef CONFIG_FILE_PATH
+	python3 cluster-provision/main.py --config $(CONFIG_FILE_PATH) test-gpu-burn
+else
+	PYTHONPATH=. python3 -m pytest tests/amd_gpu/ -v -m "gpu_burn"
+endif
+
+test-gpu-vllm:
+ifdef CONFIG_FILE_PATH
+	python3 cluster-provision/main.py --config $(CONFIG_FILE_PATH) test-gpu-vllm
+else
+	PYTHONPATH=. python3 -m pytest tests/amd_gpu/ -v -m "vllm"
 endif
 
 # ============================================
@@ -101,6 +139,10 @@ help:
 	@echo "  make cluster-operators CONFIG_FILE_PATH=<path> - Install AMD GPU operators (no tests)"
 	@echo "  make test-gpu CONFIG_FILE_PATH=<path>          - Run AMD GPU verification tests only"
 	@echo "  make test-gpu                                  - Run AMD GPU tests (local kubeconfig)"
+	@echo "  make test-gpu-workload CONFIG_FILE_PATH=<path> - Run GPU stress/workload tests (PyTorch/burn/vLLM)"
+	@echo "  make test-gpu-pytorch CONFIG_FILE_PATH=<path>  - Run only the PyTorch workload test"
+	@echo "  make test-gpu-burn CONFIG_FILE_PATH=<path>     - Run only the GPU burn/stress test"
+	@echo "  make test-gpu-vllm CONFIG_FILE_PATH=<path>     - Run only the vLLM inference test"
 	@echo "  make cluster-cleanup CONFIG_FILE_PATH=<path>   - Clean up AMD GPU operator stack"
 	@echo "  make cluster-stop CONFIG_FILE_PATH=<path>      - Stop VMs (keep disk + snapshots)"
 	@echo "  make cluster-delete CONFIG_FILE_PATH=<path>    - Delete cluster (removes everything)"
@@ -114,4 +156,4 @@ help:
 	@echo "  operators.install, operators.machine_config_role, operators.driver_version,"
 	@echo "  must_gather.artifact_dir (optional, default: ./must-gather-output)"
 
-.PHONY: test test-gpu cluster-deploy cluster-stop cluster-delete cluster-operators cluster-cleanup must-gather help
+.PHONY: test test-gpu test-gpu-workload test-gpu-pytorch test-gpu-burn test-gpu-vllm cluster-deploy cluster-stop cluster-delete cluster-operators cluster-cleanup must-gather help

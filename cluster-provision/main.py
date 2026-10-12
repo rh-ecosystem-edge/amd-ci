@@ -8,6 +8,7 @@ Usage:
   python main.py --config cluster-config.yaml deploy       # deploy cluster (no operators, no tests)
   python main.py --config cluster-config.yaml operators     # install AMD GPU operators (no tests)
   python main.py --config cluster-config.yaml test-gpu      # run AMD GPU tests only
+  python main.py --config cluster-config.yaml test-gpu-workload  # run GPU stress/workload tests only
   python main.py --config cluster-config.yaml cleanup       # remove AMD GPU operator stack
   python main.py --config cluster-config.yaml delete        # delete the cluster
   python main.py --config cluster-config.yaml stop          # power off VMs (keep disk + snapshots)
@@ -490,7 +491,7 @@ def cmd_delete(config: ClusterConfig) -> int:
     return 0
 
 
-def cmd_test_gpu(config: ClusterConfig) -> int:
+def cmd_test_gpu(config: ClusterConfig, marker_expr: str = "not workload") -> int:
     from tests.amd_gpu.runner import run_gpu_tests, run_gpu_tests_remote
 
     kubeconfig_path = _kubeconfig_path(config.cluster_name)
@@ -504,8 +505,29 @@ def cmd_test_gpu(config: ClusterConfig) -> int:
             config.remote.user,
             kubeconfig_path,
             ssh_key_path=config.remote.ssh_key_path,
+            marker_expr=marker_expr,
         )
-    return run_gpu_tests(kubeconfig_path)
+    return run_gpu_tests(kubeconfig_path, marker_expr=marker_expr)
+
+
+def cmd_test_gpu_workload(config: ClusterConfig) -> int:
+    """Run only the slow stress/workload tests (PyTorch, GPU burn, vLLM)."""
+    return cmd_test_gpu(config, marker_expr="workload")
+
+
+def cmd_test_gpu_pytorch(config: ClusterConfig) -> int:
+    """Run only the PyTorch workload test."""
+    return cmd_test_gpu(config, marker_expr="pytorch")
+
+
+def cmd_test_gpu_burn(config: ClusterConfig) -> int:
+    """Run only the GPU burn/stress workload test."""
+    return cmd_test_gpu(config, marker_expr="gpu_burn")
+
+
+def cmd_test_gpu_vllm(config: ClusterConfig) -> int:
+    """Run only the vLLM inference workload test."""
+    return cmd_test_gpu(config, marker_expr="vllm")
 
 
 def cmd_cleanup(config: ClusterConfig) -> int:
@@ -548,6 +570,10 @@ COMMANDS = {
     "delete": cmd_delete,
     "operators": cmd_operators,
     "test-gpu": cmd_test_gpu,
+    "test-gpu-workload": cmd_test_gpu_workload,
+    "test-gpu-pytorch": cmd_test_gpu_pytorch,
+    "test-gpu-burn": cmd_test_gpu_burn,
+    "test-gpu-vllm": cmd_test_gpu_vllm,
     "cleanup": cmd_cleanup,
     "stop": cmd_stop,
     "must-gather": cmd_must_gather,
@@ -583,6 +609,22 @@ Examples:
     subparsers.add_parser(
         "test-gpu",
         help="Run AMD GPU verification tests (cluster must be ready with operators installed)",
+    )
+    subparsers.add_parser(
+        "test-gpu-workload",
+        help="Run AMD GPU stress/workload tests (PyTorch, GPU burn, vLLM); slow",
+    )
+    subparsers.add_parser(
+        "test-gpu-pytorch",
+        help="Run only the PyTorch GPU workload test",
+    )
+    subparsers.add_parser(
+        "test-gpu-burn",
+        help="Run only the GPU burn/stress workload test",
+    )
+    subparsers.add_parser(
+        "test-gpu-vllm",
+        help="Run only the vLLM inference workload test",
     )
     subparsers.add_parser(
         "cleanup",
