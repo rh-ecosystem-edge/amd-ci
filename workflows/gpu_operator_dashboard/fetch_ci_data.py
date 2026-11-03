@@ -64,7 +64,7 @@ def fetch_gcs_file_content(file_path: str) -> str:
 
 def build_prow_job_url(finished_json_path: str) -> str:
     directory_path = finished_json_path[:-len('/finished.json')]
-    return f"https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/{directory_path}"
+    return f"https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results-public/{directory_path}"
 
 
 @dataclass(frozen=True)
