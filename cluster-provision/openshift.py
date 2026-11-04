@@ -28,7 +28,7 @@ def get_latest_ocp_version(version_tag: str, channel_name: str = "stable") -> st
     if channel_name != "stable":
         raise ValueError(f"Channel '{channel_name}' is not supported. Only 'stable' is currently supported.")
     
-    stream_key = "4-stable"
+    stream_key = version_tag.split('.')[0] + "-stable"
         
     if stream_key not in data:
         raise DeployError(f"Stream {stream_key} not found in response.")
