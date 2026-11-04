@@ -24,7 +24,7 @@ STATUS_ABORTED = "ABORTED"
 # Constants
 # =============================================================================
 
-GCS_API_BASE_URL = "https://storage.googleapis.com/storage/v1/b/test-platform-results/o"
+GCS_API_BASE_URL = "https://storage.googleapis.com/storage/v1/b/test-platform-results-public/o"
 
 # Job name pattern for amd-ci e2e tests:
 #   pull-ci-rh-ecosystem-edge-amd-ci-main-<ocp_version>-stable-e2e-amd-ci[-<gpu_version>]
@@ -370,7 +370,7 @@ def process_tests_for_pr(
             )
             continue
 
-        job_history_url = f"https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/{job_name}"
+        job_history_url = f"https://prow.ci.openshift.org/job-history/gs/test-platform-results-public/pr-logs/directory/{job_name}"
         results_by_ocp[ocp_version]["job_history_links"].add(job_history_url)
 
         if result.test_status != STATUS_ABORTED:
