@@ -1,5 +1,7 @@
 #!/usr/bin/env python
+import argparse
 import json
+import sys
 from typing import Dict, List, Optional, Set, Tuple
 from workflows.common.utils import logger
 from workflows.common.broken_versions import find_broken_entry, load_broken_versions
@@ -18,6 +20,49 @@ def save_tests_commands(tests_commands: set, file_path: str):
     with open(file_path, "w+") as f:
         for command in sorted(tests_commands):
             f.write(command + "\n")
+
+
+def save_version_change_summary(
+    target_ocp_version: Optional[str],
+    target_gpu_version: Optional[str],
+    old_versions: dict,
+    new_versions: dict,
+    file_path: str
+):
+    """
+    Save a summary of version changes to a file for use in commit messages.
+
+    Format:
+    OLD_VERSION=X.Y.Z
+    NEW_VERSION=X.Y.Z
+    VERSION_TYPE=ocp|gpu
+    MINOR_VERSION=X.Y
+    """
+    summary = {}
+
+    if target_ocp_version:
+        old_ver = old_versions.get("ocp", {}).get(target_ocp_version, "unknown")
+        new_ver = new_versions.get("ocp", {}).get(target_ocp_version, "unknown")
+        summary = {
+            "OLD_VERSION": old_ver,
+            "NEW_VERSION": new_ver,
+            "VERSION_TYPE": "ocp",
+            "MINOR_VERSION": target_ocp_version
+        }
+    elif target_gpu_version:
+        old_ver = old_versions.get("gpu-operator", {}).get(target_gpu_version, "unknown")
+        new_ver = new_versions.get("gpu-operator", {}).get(target_gpu_version, "unknown")
+        summary = {
+            "OLD_VERSION": old_ver,
+            "NEW_VERSION": new_ver,
+            "VERSION_TYPE": "gpu",
+            "MINOR_VERSION": target_gpu_version
+        }
+
+    if summary:
+        with open(file_path, "w") as f:
+            for key, value in summary.items():
+                f.write(f"{key}={value}\n")
 
 
 def create_tests_matrix(diffs: dict, ocp_releases: list, gpu_releases: list) -> set:
@@ -170,23 +215,30 @@ def version2suffix(v: str):
 def main():
     """
     Main function to detect version changes and generate test commands.
-    
-    Process:
-    1. Fetch current AMD GPU operator and OpenShift versions
-    2. Load previously stored versions
-    3. Calculate differences
-    4. Generate test matrix
-    5. Save test commands to file
-    6. Update version file
+
+    Modes:
+    1. Default: Detect all changes, update versions.json, generate all test commands
+    2. --detect-only: Detect changes and output as JSON, don't modify files
+    3. --target-ocp-version X.Y: Update only specific OCP version, generate tests for it
+    4. --target-gpu-version X.Y: Update only specific GPU version, generate tests for it
     """
+    parser = argparse.ArgumentParser(description='AMD GPU Operator version detection and testing')
+    parser.add_argument('--detect-only', action='store_true',
+                       help='Detect changes and output as JSON without modifying files')
+    parser.add_argument('--target-ocp-version', type=str,
+                       help='Update only this specific OCP minor version (e.g., 4.22)')
+    parser.add_argument('--target-gpu-version', type=str,
+                       help='Update only this specific GPU operator version (e.g., 1.5)')
+    args = parser.parse_args()
+
     logger.info('Starting AMD GPU Operator CI version detection')
-    
+
     settings = Settings()
-    
+
     # Fetch current versions
     logger.info('Fetching AMD GPU operator versions...')
     gpu_versions = get_operator_versions(settings)
-    
+
     logger.info('Fetching OpenShift versions...')
     ocp_versions = fetch_ocp_versions(settings)
 
@@ -194,33 +246,90 @@ def main():
         "gpu-operator": gpu_versions,
         "ocp": ocp_versions
     }
-    
+
     logger.info(f'Fetched versions: OCP={len(ocp_versions)}, GPU={len(gpu_versions)}')
 
-    # Load old versions and update file
-    with open(settings.version_file_path, "r+") as json_f:
+    # Load old versions
+    with open(settings.version_file_path, "r") as json_f:
         old_versions = json.load(json_f)
-        json_f.seek(0)
-        json.dump(new_versions, json_f, indent=4)
-        json_f.truncate()
-    
-    logger.info('Version file updated')
 
     # Calculate differences
     diffs = calculate_diffs(old_versions, new_versions)
-    
+
     if not diffs:
         logger.info('No version changes detected')
     else:
         logger.info(f'Detected changes in: {list(diffs.keys())}')
-    
+
+    # DETECT-ONLY MODE: Output changes as JSON and exit
+    if args.detect_only:
+        output = {
+            "ocp_versions": list(diffs.get("ocp", {}).keys()),
+            "gpu_versions": list(diffs.get("gpu-operator", {}).keys()),
+            "ocp_details": diffs.get("ocp", {}),
+            "gpu_details": diffs.get("gpu-operator", {})
+        }
+        print(json.dumps(output))
+        logger.info('Detection complete (detect-only mode)')
+        return
+
+    # TARGET MODE: Update only specific version(s)
+    versions_to_update = {}
+    target_diffs = {}
+
+    if args.target_ocp_version:
+        logger.info(f'Target mode: OCP version {args.target_ocp_version}')
+        if args.target_ocp_version in new_versions["ocp"]:
+            versions_to_update["ocp"] = {
+                args.target_ocp_version: new_versions["ocp"][args.target_ocp_version]
+            }
+            if args.target_ocp_version in diffs.get("ocp", {}):
+                target_diffs["ocp"] = {args.target_ocp_version: diffs["ocp"][args.target_ocp_version]}
+        else:
+            logger.error(f'Target OCP version {args.target_ocp_version} not found in fetched versions')
+            sys.exit(1)
+
+    if args.target_gpu_version:
+        logger.info(f'Target mode: GPU operator version {args.target_gpu_version}')
+        if args.target_gpu_version in new_versions["gpu-operator"]:
+            versions_to_update["gpu-operator"] = {
+                args.target_gpu_version: new_versions["gpu-operator"][args.target_gpu_version]
+            }
+            if args.target_gpu_version in diffs.get("gpu-operator", {}):
+                target_diffs["gpu-operator"] = {args.target_gpu_version: diffs["gpu-operator"][args.target_gpu_version]}
+        else:
+            logger.error(f'Target GPU version {args.target_gpu_version} not found in fetched versions')
+            sys.exit(1)
+
+    # Determine what to update and what diffs to use for test generation
+    if versions_to_update:
+        # Target mode: partial update
+        update_versions = versions_to_update
+        test_diffs = target_diffs
+    else:
+        # Default mode: full update
+        update_versions = new_versions
+        test_diffs = diffs
+
+    # Update version file with selected versions
+    with open(settings.version_file_path, "r+") as json_f:
+        current = json.load(json_f)
+        # Merge updates into current versions
+        for category, versions in update_versions.items():
+            if category not in current:
+                current[category] = {}
+            current[category].update(versions)
+        json_f.seek(0)
+        json.dump(current, json_f, indent=4)
+        json_f.truncate()
+
+    logger.info('Version file updated')
+
     # Generate test commands
     ocp_releases = list(ocp_versions.keys())
     all_gpu_releases = list(gpu_versions.keys())
-    
+
     # Determine GPU releases to test new OCP versions against
-    # Default: Test against ALL GPU operator versions
-    # If GPU_VERSIONS_TO_TEST_COUNT env var is set: Test against only the latest X versions
     if settings.gpu_versions_to_test_count is not None:
         gpu_releases_for_ocp = get_latest_versions(all_gpu_releases, settings.gpu_versions_to_test_count)
         logger.info(f'GPU_VERSIONS_TO_TEST_COUNT={settings.gpu_versions_to_test_count} - '
@@ -229,18 +338,29 @@ def main():
         gpu_releases_for_ocp = all_gpu_releases
         logger.info(f'GPU_VERSIONS_TO_TEST_COUNT not set - '
                     f'new OCP versions will be tested against ALL {len(gpu_releases_for_ocp)} GPU releases')
-    
+
     logger.info(f'Generating tests for {len(ocp_releases)} OCP releases')
     logger.info(f'New GPU versions will be tested against all {len(ocp_releases)} OCP releases')
 
     broken_entries = load_broken_versions(settings.broken_versions_file_path)
     tests_commands = create_tests_commands(
-        diffs, ocp_releases, gpu_releases_for_ocp, ocp_versions, gpu_versions, broken_entries
+        test_diffs, ocp_releases, gpu_releases_for_ocp, ocp_versions, gpu_versions, broken_entries
     )
-    
+
     logger.info(f'Generated {len(tests_commands)} test commands')
     save_tests_commands(tests_commands, settings.tests_to_trigger_file_path)
-    
+
+    # Save version change summary for commit messages (target mode only)
+    if settings.version_change_summary_file_path and (args.target_ocp_version or args.target_gpu_version):
+        save_version_change_summary(
+            args.target_ocp_version,
+            args.target_gpu_version,
+            old_versions,
+            new_versions,
+            settings.version_change_summary_file_path
+        )
+        logger.info(f'Version change summary saved to {settings.version_change_summary_file_path}')
+
     logger.info('AMD GPU Operator CI version detection complete')
 
 

@@ -5,6 +5,7 @@ class Settings:
     ignored_versions: str
     version_file_path: str
     tests_to_trigger_file_path: str
+    version_change_summary_file_path: Optional[str]
     broken_versions_file_path: Optional[str]
     request_timeout_sec: int
     gpu_versions_to_test_count: Optional[int]
@@ -13,6 +14,7 @@ class Settings:
         self.ignored_versions = os.getenv("OCP_IGNORED_VERSIONS_REGEX", "4\\.(7|8|9|10|11|12|13|14|15)").rstrip()
         self.version_file_path = os.getenv("VERSION_FILE_PATH")
         self.tests_to_trigger_file_path = os.getenv("TEST_TO_TRIGGER_FILE_PATH")
+        self.version_change_summary_file_path = os.getenv("VERSION_CHANGE_SUMMARY_FILE_PATH")
         self.request_timeout_sec = int(os.getenv("REQUEST_TIMEOUT_SECONDS", 30))
 
         # BROKEN_VERSIONS_FILE_PATH: path to the manually-maintained file listing OCP/GPU

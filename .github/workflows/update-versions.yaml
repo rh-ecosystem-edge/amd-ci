@@ -15,8 +15,149 @@ on:
         type: string
         default: '2'
 jobs:
-  ocp-version:
+  detect-changes:
     if: github.event_name != 'schedule' || github.repository == 'rh-ecosystem-edge/amd-ci' || vars.VERSION_UPDATE_FLOW_ENABLE_SCHEDULED == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      ocp_versions: ${{ steps.detect.outputs.ocp_versions }}
+      gpu_versions: ${{ steps.detect.outputs.gpu_versions }}
+      has_ocp_changes: ${{ steps.detect.outputs.has_ocp_changes }}
+      has_gpu_changes: ${{ steps.detect.outputs.has_gpu_changes }}
+    steps:
+      - name: Check out the Repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || github.ref }}
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.13
+      - name: Detect Version Changes
+        id: detect
+        run: |
+          pip install -r workflows/gpu_operator_versions/requirements.txt
+          DETECTED=$(python -m workflows.gpu_operator_versions.update_versions --detect-only)
+          echo "Detection result: $DETECTED"
+
+          OCP_VERSIONS=$(echo "$DETECTED" | jq -c '.ocp_versions')
+          GPU_VERSIONS=$(echo "$DETECTED" | jq -c '.gpu_versions')
+
+          echo "ocp_versions=$OCP_VERSIONS" >> $GITHUB_OUTPUT
+          echo "gpu_versions=$GPU_VERSIONS" >> $GITHUB_OUTPUT
+
+          HAS_OCP=$(echo "$DETECTED" | jq -r '.ocp_versions | length > 0')
+          HAS_GPU=$(echo "$DETECTED" | jq -r '.gpu_versions | length > 0')
+
+          echo "has_ocp_changes=$HAS_OCP" >> $GITHUB_OUTPUT
+          echo "has_gpu_changes=$HAS_GPU" >> $GITHUB_OUTPUT
+        env:
+          GH_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OCP_IGNORED_VERSIONS_REGEX: "^4\\.(7|8|9|10|11|12|13|14|15)(\\.|$)|^4\\.18\\.22$"
+          VERSION_FILE_PATH: "workflows/gpu_operator_versions/versions.json"
+          TEST_TO_TRIGGER_FILE_PATH: "workflows/generated-files/tests_to_trigger.txt"
+          BROKEN_VERSIONS_FILE_PATH: "workflows/gpu_operator_versions/broken_versions.json"
+
+  create-ocp-prs:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_ocp_changes == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ocp_version: ${{ fromJson(needs.detect-changes.outputs.ocp_versions) }}
+      max-parallel: 5
+    steps:
+      - name: Check out the Repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || github.ref }}
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.13
+      - name: Update OCP Version ${{ matrix.ocp_version }}
+        id: update_version
+        run: |
+          pip install -r workflows/gpu_operator_versions/requirements.txt
+          mkdir -p $(dirname ${TEST_TO_TRIGGER_FILE_PATH})
+          mkdir -p $(dirname ${VERSION_CHANGE_SUMMARY_FILE_PATH})
+          python -m workflows.gpu_operator_versions.update_versions --target-ocp-version ${{ matrix.ocp_version }}
+
+          # Read version change summary
+          if [ -f "${VERSION_CHANGE_SUMMARY_FILE_PATH}" ]; then
+            source ${VERSION_CHANGE_SUMMARY_FILE_PATH}
+            echo "OLD_VERSION=${OLD_VERSION}" >> $GITHUB_OUTPUT
+            echo "NEW_VERSION=${NEW_VERSION}" >> $GITHUB_OUTPUT
+            echo "VERSION_CHANGE=${OLD_VERSION} → ${NEW_VERSION}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION_CHANGE=latest" >> $GITHUB_OUTPUT
+          fi
+
+          {
+           echo 'TEST_TRIGGERS<<EOF'
+           cat ${TEST_TO_TRIGGER_FILE_PATH}
+           echo 'EOF'
+          } >> $GITHUB_OUTPUT
+        env:
+          GH_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OCP_IGNORED_VERSIONS_REGEX: "^4\\.(7|8|9|10|11|12|13|14|15)(\\.|$)|^4\\.18\\.22$"
+          VERSION_FILE_PATH: "workflows/gpu_operator_versions/versions.json"
+          TEST_TO_TRIGGER_FILE_PATH: "workflows/generated-files/tests_to_trigger.txt"
+          VERSION_CHANGE_SUMMARY_FILE_PATH: "workflows/generated-files/version_change_summary.txt"
+          BROKEN_VERSIONS_FILE_PATH: "workflows/gpu_operator_versions/broken_versions.json"
+          GPU_VERSIONS_TO_TEST_COUNT: ${{ inputs.gpu_versions_to_test_count || '2' }}
+      - name: Check for existing PR
+        id: check_pr
+        run: |
+          # Search for open PRs with matching title pattern
+          SEARCH_TITLE="Update OCP ${{ matrix.ocp_version }}: ${{ steps.update_version.outputs.VERSION_CHANGE }}"
+
+          # Check if a PR with this exact version update already exists
+          EXISTING_PR=$(gh pr list \
+            --state open \
+            --search "in:title \"Update OCP ${{ matrix.ocp_version }}\"" \
+            --json number,title \
+            --jq ".[] | select(.title | contains(\"${{ steps.update_version.outputs.VERSION_CHANGE }}\")) | .number" \
+            || echo "")
+
+          if [ -n "$EXISTING_PR" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "pr_number=$EXISTING_PR" >> $GITHUB_OUTPUT
+            echo "Found existing PR #$EXISTING_PR with matching version update"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "No existing PR found for this version update"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Pull Request for OCP ${{ matrix.ocp_version }}
+        if: steps.check_pr.outputs.exists == 'false'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          title: "Update OCP ${{ matrix.ocp_version }}: ${{ steps.update_version.outputs.VERSION_CHANGE }}"
+          commit-message: "Update OCP ${{ matrix.ocp_version }}: ${{ steps.update_version.outputs.VERSION_CHANGE }}"
+          branch: update-ocp-${{ matrix.ocp_version }}/${{ github.run_id }}
+          body: |
+            :warning: Before approving the PR, run the following tests:
+
+            ```
+            ${{ steps.update_version.outputs.TEST_TRIGGERS }}
+            /ok-to-test
+            /approve
+            ```
+
+            Update OpenShift ${{ matrix.ocp_version }}: **${{ steps.update_version.outputs.VERSION_CHANGE }}**
+            ---
+            ${{ vars.VERSION_UPDATE_FLOW_NOTIFY_USERS }}
+          delete-branch: true
+          assignees: ${{ vars.VERSION_UPDATE_FLOW_ASSIGNEES }}
+      - name: Skip PR creation (already exists)
+        if: steps.check_pr.outputs.exists == 'true'
+        run: |
+          echo "⏭️ Skipping PR creation - PR #${{ steps.check_pr.outputs.pr_number }} already exists for this version update"
+
+  create-gpu-pr:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_gpu_changes == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out the Repo
@@ -27,44 +168,94 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: 3.13
-      - name: Update OCP Version
-        id: read_tests
+      - name: Update GPU Operator Versions
+        id: update_gpu
         run: |
           pip install -r workflows/gpu_operator_versions/requirements.txt
           mkdir -p $(dirname ${TEST_TO_TRIGGER_FILE_PATH})
-          python -m workflows.gpu_operator_versions.update_versions
+          mkdir -p $(dirname ${VERSION_CHANGE_SUMMARY_FILE_PATH})
+
+          # Update all GPU versions that changed and collect version changes
+          GPU_VERSIONS='${{ needs.detect-changes.outputs.gpu_versions }}'
+          VERSION_CHANGES=""
+
+          for version in $(echo "$GPU_VERSIONS" | jq -r '.[]'); do
+            echo "Updating GPU operator version: $version"
+            python -m workflows.gpu_operator_versions.update_versions --target-gpu-version "$version"
+
+            # Read version change summary for this version
+            if [ -f "${VERSION_CHANGE_SUMMARY_FILE_PATH}" ]; then
+              source ${VERSION_CHANGE_SUMMARY_FILE_PATH}
+              if [ -z "$VERSION_CHANGES" ]; then
+                VERSION_CHANGES="$version: ${OLD_VERSION} → ${NEW_VERSION}"
+              else
+                VERSION_CHANGES="${VERSION_CHANGES}, $version: ${OLD_VERSION} → ${NEW_VERSION}"
+              fi
+            fi
+          done
+
+          echo "VERSION_CHANGES=${VERSION_CHANGES}" >> $GITHUB_OUTPUT
+
           {
            echo 'TEST_TRIGGERS<<EOF'
            cat ${TEST_TO_TRIGGER_FILE_PATH}
            echo 'EOF'
           } >> $GITHUB_OUTPUT
-
         env:
           GH_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OCP_IGNORED_VERSIONS_REGEX: "^4\\.(7|8|9|10|11|12|13|14|15)(\\.|$)|^4\\.18\\.22$"
           VERSION_FILE_PATH: "workflows/gpu_operator_versions/versions.json"
           TEST_TO_TRIGGER_FILE_PATH: "workflows/generated-files/tests_to_trigger.txt"
+          VERSION_CHANGE_SUMMARY_FILE_PATH: "workflows/generated-files/version_change_summary.txt"
           BROKEN_VERSIONS_FILE_PATH: "workflows/gpu_operator_versions/broken_versions.json"
-          GPU_VERSIONS_TO_TEST_COUNT: ${{ inputs.gpu_versions_to_test_count || '2' }}
-      - name: Create Pull Request
+      - name: Check for existing PR
+        id: check_pr
+        run: |
+          # Get the list of changed GPU versions for title matching
+          GPU_VERSIONS='${{ needs.detect-changes.outputs.gpu_versions }}'
+          VERSION_LIST=$(echo "$GPU_VERSIONS" | jq -r 'join(", ")')
+
+          # Check if a PR with matching GPU version updates already exists
+          EXISTING_PR=$(gh pr list \
+            --state open \
+            --search "in:title \"Update AMD GPU Operator\"" \
+            --json number,title,body \
+            --jq ".[] | select(.body | contains(\"${{ steps.update_gpu.outputs.VERSION_CHANGES }}\")) | .number" \
+            || echo "")
+
+          if [ -n "$EXISTING_PR" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "pr_number=$EXISTING_PR" >> $GITHUB_OUTPUT
+            echo "Found existing PR #$EXISTING_PR with matching GPU version updates"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "No existing PR found for these GPU version updates"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Pull Request for GPU Operator
+        if: steps.check_pr.outputs.exists == 'false'
         uses: peter-evans/create-pull-request@v7
         with:
-          title: "[Automatic] Update versions, run ID: ${{ github.run_id }}"
-          commit-message: Update versions
-          branch: update-versions/${{ github.run_id }}
+          title: "Update AMD GPU Operator: ${{ steps.update_gpu.outputs.VERSION_CHANGES }}"
+          commit-message: "Update AMD GPU Operator: ${{ steps.update_gpu.outputs.VERSION_CHANGES }}"
+          branch: update-gpu-operator/${{ github.run_id }}
           body: |
             :warning: Before approving the PR, run the following tests:
 
             ```
-            ${{ steps.read_tests.outputs.TEST_TRIGGERS }}
+            ${{ steps.update_gpu.outputs.TEST_TRIGGERS }}
             /ok-to-test
             /approve
             ```
 
-            Update the AMD GPU operator on OpenShift test matrix
+            Update AMD GPU Operator: **${{ steps.update_gpu.outputs.VERSION_CHANGES }}**
             ---
             ${{ vars.VERSION_UPDATE_FLOW_NOTIFY_USERS }}
           delete-branch: true
           assignees: ${{ vars.VERSION_UPDATE_FLOW_ASSIGNEES }}
+      - name: Skip PR creation (already exists)
+        if: steps.check_pr.outputs.exists == 'true'
+        run: |
+          echo "⏭️ Skipping PR creation - PR #${{ steps.check_pr.outputs.pr_number }} already exists for these GPU version updates"
 
-            
