@@ -16,10 +16,10 @@ def fetch_ocp_versions(settings: Settings) -> dict[str, str]:
     Fetches accepted OpenShift versions from the release API.
 
     The function filters out versions based on the regex pattern defined in settings.ignored_versions.
-    For each minor version (e.g., 4.12), only the highest patch version is kept.
+    For each minor version (e.g., 4.12, 5.0), only the highest patch version is kept.
 
     Returns:
-        dict: A dictionary mapping minor versions (e.g., '4.12') to their highest patch version (e.g., '4.12.3').
+        dict: A dictionary mapping minor versions (e.g., '4.12', '5.0') to their highest patch version (e.g., '4.12.3', '5.0.0').
     """
 
     logger.info(f'Ignored versions: {settings.ignored_versions}')
@@ -29,7 +29,10 @@ def fetch_ocp_versions(settings: Settings) -> dict[str, str]:
     logger.info('Listing accepted OpenShift versions')
     response = requests.get(RELEASE_URL_API, timeout=settings.request_timeout_sec)
     response.raise_for_status()
-    accepted_versions = response.json()['4-stable']
+    release_data = response.json()
+
+    # Fetch from both 4-stable and 5-stable streams
+    accepted_versions = release_data.get('4-stable', []) + release_data.get('5-stable', [])
     logger.debug(f'Received OpenShift versions: {accepted_versions}')
 
     for ver in accepted_versions:
