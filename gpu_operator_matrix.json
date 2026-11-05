@@ -536,6 +536,20 @@
         "notes": [],
         "release_tests": [
             {
+                "ocp_full_version": "4.21.41",
+                "gpu_operator_version": "1.5.1",
+                "test_status": "SUCCESS",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results-public/pr-logs/pull/rh-ecosystem-edge_amd-ci/257/pull-ci-rh-ecosystem-edge-amd-ci-main-4.21-stable-e2e-amd-ci-1-5-x/2118229365958381568",
+                "job_timestamp": "1793862133"
+            },
+            {
+                "ocp_full_version": "4.21.41",
+                "gpu_operator_version": "1.4.1",
+                "test_status": "SUCCESS",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results-public/pr-logs/pull/rh-ecosystem-edge_amd-ci/257/pull-ci-rh-ecosystem-edge-amd-ci-main-4.21-stable-e2e-amd-ci-1-4-x/2118120287537991680",
+                "job_timestamp": "1793845265"
+            },
+            {
                 "ocp_full_version": "4.21.32",
                 "gpu_operator_version": "1.5.1",
                 "test_status": "SUCCESS",
@@ -866,6 +880,8 @@
             }
         ],
         "job_history_links": [
+            "https://prow.ci.openshift.org/job-history/gs/test-platform-results-public/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.21-stable-e2e-amd-ci-1-4-x",
+            "https://prow.ci.openshift.org/job-history/gs/test-platform-results-public/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.21-stable-e2e-amd-ci-1-5-x",
             "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.21-stable-e2e-amd-ci",
             "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.21-stable-e2e-amd-ci-1-3-x",
             "https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-rh-ecosystem-edge-amd-ci-main-4.21-stable-e2e-amd-ci-1-4-x",
