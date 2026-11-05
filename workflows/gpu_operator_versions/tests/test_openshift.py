@@ -138,12 +138,12 @@ class TestFetchOCPVersions(unittest.TestCase):
 
     @patch('workflows.gpu_operator_versions.openshift.requests.get')
     def test_fetch_ocp_versions_invalid_response_structure(self, mock_get):
-        """Verify that missing 4-stable key raises KeyError."""
+        """Verify that missing 4-stable and 5-stable keys returns empty dict."""
         mock_settings = self._create_mock_settings()
         mock_get.return_value = self._create_mock_response({'some-other-key': []})
 
-        with self.assertRaises(KeyError):
-            fetch_ocp_versions(mock_settings)
+        result = fetch_ocp_versions(mock_settings)
+        self.assertEqual(result, {})
 
     @patch('workflows.gpu_operator_versions.openshift.requests.get')
     def test_fetch_ocp_versions_skips_prerelease(self, mock_get):
@@ -191,6 +191,57 @@ class TestFetchOCPVersions(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             fetch_ocp_versions(mock_settings)
+
+    @patch('workflows.gpu_operator_versions.openshift.requests.get')
+    def test_fetch_ocp_versions_combines_4_and_5_stable(self, mock_get):
+        """Verify that both 4-stable and 5-stable versions are fetched."""
+        mock_settings = self._create_mock_settings()
+        mock_get.return_value = self._create_mock_response({
+            '4-stable': ['4.21.1', '4.21.2', '4.22.0'],
+            '5-stable': ['5.0.0', '5.0.1', '5.1.0']
+        })
+
+        result = fetch_ocp_versions(mock_settings)
+
+        expected = {
+            '4.21': '4.21.2',
+            '4.22': '4.22.0',
+            '5.0': '5.0.1',
+            '5.1': '5.1.0',
+        }
+        self.assertEqual(result, expected)
+
+    @patch('workflows.gpu_operator_versions.openshift.requests.get')
+    def test_fetch_ocp_versions_handles_missing_5_stable(self, mock_get):
+        """Verify that function works when only 4-stable exists."""
+        mock_settings = self._create_mock_settings()
+        mock_get.return_value = self._create_mock_response({
+            '4-stable': ['4.21.1', '4.22.0']
+        })
+
+        result = fetch_ocp_versions(mock_settings)
+
+        expected = {
+            '4.21': '4.21.1',
+            '4.22': '4.22.0',
+        }
+        self.assertEqual(result, expected)
+
+    @patch('workflows.gpu_operator_versions.openshift.requests.get')
+    def test_fetch_ocp_versions_handles_missing_4_stable(self, mock_get):
+        """Verify that function works when only 5-stable exists."""
+        mock_settings = self._create_mock_settings()
+        mock_get.return_value = self._create_mock_response({
+            '5-stable': ['5.0.0', '5.1.0']
+        })
+
+        result = fetch_ocp_versions(mock_settings)
+
+        expected = {
+            '5.0': '5.0.0',
+            '5.1': '5.1.0',
+        }
+        self.assertEqual(result, expected)
 
     @patch('workflows.gpu_operator_versions.openshift.requests.get')
     def test_fetch_ocp_versions_uses_configured_timeout(self, mock_get):
