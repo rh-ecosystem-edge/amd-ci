@@ -3,6 +3,20 @@
         "notes": [],
         "release_tests": [
             {
+                "ocp_full_version": "4.20.46",
+                "gpu_operator_version": "1.4.1",
+                "test_status": "SUCCESS",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results-public/pr-logs/pull/rh-ecosystem-edge_amd-ci/267/pull-ci-rh-ecosystem-edge-amd-ci-main-4.20-stable-e2e-amd-ci-1-4-x/2119230148610887680",
+                "job_timestamp": "1794105832"
+            },
+            {
+                "ocp_full_version": "4.20.46",
+                "gpu_operator_version": "1.5.1",
+                "test_status": "SUCCESS",
+                "prow_job_url": "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results-public/pr-logs/pull/rh-ecosystem-edge_amd-ci/267/pull-ci-rh-ecosystem-edge-amd-ci-main-4.20-stable-e2e-amd-ci-1-5-x/2119230148640247808",
+                "job_timestamp": "1794104351"
+            },
+            {
                 "ocp_full_version": "4.20.45",
                 "gpu_operator_version": "1.5.1",
                 "test_status": "SUCCESS",
