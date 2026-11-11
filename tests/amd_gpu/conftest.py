@@ -16,6 +16,14 @@ logger = logging.getLogger(__name__)
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers."""
     config.addinivalue_line("markers", "amd_gpu: AMD GPU operator verification tests")
+    config.addinivalue_line(
+        "markers",
+        "workload: AMD GPU stress/workload tests (PyTorch, GPU burn, vLLM); "
+        "slow, excluded from the default run",
+    )
+    config.addinivalue_line("markers", "pytorch: PyTorch GPU workload test")
+    config.addinivalue_line("markers", "gpu_burn: sustained GPU burn/stress test")
+    config.addinivalue_line("markers", "vllm: vLLM LLM inference workload test")
 
 
 # ---------------------------------------------------------------------------

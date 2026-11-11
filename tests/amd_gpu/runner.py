@@ -30,8 +30,17 @@ _TUNNEL_SSH_OPTS = (
 )
 
 
-def run_gpu_tests(kubeconfig_path: str | Path) -> int:
+def run_gpu_tests(
+    kubeconfig_path: str | Path,
+    marker_expr: str = "not workload",
+) -> int:
     """Run AMD GPU verification tests.
+
+    Args:
+        kubeconfig_path: Path to the kubeconfig for the target cluster.
+        marker_expr: pytest ``-m`` marker expression selecting which tests to
+            run. Defaults to ``"not workload"`` so the slow stress/workload
+            suite is excluded; pass ``"workload"`` to run only those.
 
     Returns the pytest exit code (0 = all tests passed).
     """
@@ -44,6 +53,7 @@ def run_gpu_tests(kubeconfig_path: str | Path) -> int:
 
     print("\n" + "=" * 60)
     print("Running AMD GPU Verification Tests")
+    print(f"  Marker filter: {marker_expr}")
     print("=" * 60)
 
     env = {
@@ -53,7 +63,7 @@ def run_gpu_tests(kubeconfig_path: str | Path) -> int:
     }
 
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", str(test_dir), "-v"],
+        [sys.executable, "-m", "pytest", str(test_dir), "-v", "-m", marker_expr],
         env=env,
         cwd=str(repo_root),
     )
@@ -75,6 +85,7 @@ def run_gpu_tests_remote(
     remote_user: str,
     kubeconfig_path: Path,
     ssh_key_path: str | None = None,
+    marker_expr: str = "not workload",
 ) -> int:
     """Run GPU tests against a remote cluster via an SSH tunnel.
 
@@ -134,7 +145,7 @@ def run_gpu_tests_remote(
     tmp_kc.close()
 
     try:
-        return run_gpu_tests(tmp_kc.name)
+        return run_gpu_tests(tmp_kc.name, marker_expr=marker_expr)
     finally:
         Path(tmp_kc.name).unlink(missing_ok=True)
         tunnel.terminate()
