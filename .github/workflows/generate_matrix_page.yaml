@@ -1,10 +1,9 @@
 name: Generate test matrices pages
 
 on:
-  pull_request_target:
+  push:
     branches:
       - main
-    types: [closed]
   workflow_dispatch:
     inputs:
       branch:
@@ -26,7 +25,7 @@ permissions:
   issues: write
 jobs:
   generate-matrix:
-    if: github.event_name != 'pull_request_target' || github.repository == 'rh-ecosystem-edge/amd-ci'
+    if: github.event_name != 'push' || github.repository == 'rh-ecosystem-edge/amd-ci'
     runs-on: ubuntu-latest
     env:
       DASHBOARD_OUTPUT_DIR: 'workflows/gpu_operator_dashboard/output'
@@ -43,17 +42,27 @@ jobs:
         id: determine_pr
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" == "pull_request_target" ]; then
-              echo "Processing merged pull request."
-              echo "PR_NUMBER=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" == "push" ]; then
+              echo "Finding PR associated with merge commit."
+              # Find the PR number from the merge commit
+              PR_NUMBER=$(gh pr list --state merged --json number,mergeCommit --jq ".[] | select(.mergeCommit.oid == \"${{ github.sha }}\") | .number")
+              if [ -z "$PR_NUMBER" ]; then
+                echo "No PR found for this push, skipping dashboard generation."
+                echo "PR_NUMBER=" >> "$GITHUB_OUTPUT"
+              else
+                echo "Processing merged pull request #$PR_NUMBER"
+                echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+              fi
           else
               echo "PR_NUMBER=${{ github.event.inputs.pr_number }}" >> "$GITHUB_OUTPUT"
           fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.ref || github.event.inputs.branch }}
+          ref: ${{ github.event.inputs.branch || github.ref }}
 
       - name: Checkout GitHub Pages
         uses: actions/checkout@v4
@@ -71,6 +80,7 @@ jobs:
           pip install -r workflows/gpu_operator_dashboard/requirements.txt
 
       - name: Fetch CI Data
+        if: steps.determine_pr.outputs.PR_NUMBER != ''
         run: |
           echo "Processing PR: ${{ steps.determine_pr.outputs.PR_NUMBER }}"
           python -m workflows.gpu_operator_dashboard.fetch_ci_data \
@@ -80,9 +90,10 @@ jobs:
             --broken_versions_filepath "${{ env.BROKEN_VERSIONS_FILEPATH }}"
 
       - name: Generate HTML Dashboard (only if JSON changed)
+        if: steps.determine_pr.outputs.PR_NUMBER != ''
         run: |
           cd "${{ env.DASHBOARD_OUTPUT_DIR }}"
-          if [[ ${{ github.event_name }} == "pull_request_target" ]] && git diff --exit-code gpu_operator_matrix.json; then
+          if [[ ${{ github.event_name }} == "push" ]] && git diff --exit-code gpu_operator_matrix.json; then
             echo "no changes"
           else
             cd "${{ github.workspace }}"
@@ -93,6 +104,7 @@ jobs:
           fi
 
       - name: Deploy HTML to GitHub Pages
+        if: steps.determine_pr.outputs.PR_NUMBER != ''
         uses: JamesIves/github-pages-deploy-action@v4
         with:
           branch: ${{ env.GH_PAGES_BRANCH }}
@@ -102,11 +114,18 @@ jobs:
 
       - name: Delete merged branch
         if: |
-          github.event_name == 'pull_request_target' &&
-          github.event.pull_request.merged == true &&
-          github.event.pull_request.user.login == 'github-actions[bot]'
-        env:
-          BRANCH: ${{ github.event.pull_request.head.ref }}
+          github.event_name == 'push' &&
+          steps.determine_pr.outputs.PR_NUMBER != ''
         run: |
-          echo "Deleting merged branch: $BRANCH"
-          git push origin --delete "$BRANCH" || echo "Branch $BRANCH already deleted or doesn't exist"
+          # Get PR details to check if it was created by github-actions bot
+          PR_AUTHOR=$(gh pr view ${{ steps.determine_pr.outputs.PR_NUMBER }} --json author --jq '.author.login')
+          BRANCH=$(gh pr view ${{ steps.determine_pr.outputs.PR_NUMBER }} --json headRefName --jq '.headRefName')
+
+          if [ "$PR_AUTHOR" == "github-actions[bot]" ]; then
+            echo "Deleting merged branch: $BRANCH"
+            git push origin --delete "$BRANCH" || echo "Branch $BRANCH already deleted or doesn't exist"
+          else
+            echo "PR was not created by github-actions bot, skipping branch deletion"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
