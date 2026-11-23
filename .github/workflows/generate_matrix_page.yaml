@@ -45,7 +45,7 @@ jobs:
           if [ "${{ github.event_name }}" == "push" ]; then
               echo "Finding PR associated with merge commit."
               # Find the PR number from the merge commit
-              PR_NUMBER=$(gh pr list --state merged --json number,mergeCommit --jq ".[] | select(.mergeCommit.oid == \"${{ github.sha }}\") | .number")
+              PR_NUMBER=$(gh pr list -R ${{ github.repository }} --state merged --json number,mergeCommit --jq ".[] | select(.mergeCommit.oid == \"${{ github.sha }}\") | .number")
               if [ -z "$PR_NUMBER" ]; then
                 echo "No PR found for this push, skipping dashboard generation."
                 echo "PR_NUMBER=" >> "$GITHUB_OUTPUT"
@@ -118,8 +118,8 @@ jobs:
           steps.determine_pr.outputs.PR_NUMBER != ''
         run: |
           # Get PR details to check if it was created by github-actions bot
-          PR_AUTHOR=$(gh pr view ${{ steps.determine_pr.outputs.PR_NUMBER }} --json author --jq '.author.login')
-          BRANCH=$(gh pr view ${{ steps.determine_pr.outputs.PR_NUMBER }} --json headRefName --jq '.headRefName')
+          PR_AUTHOR=$(gh pr view -R ${{ github.repository }} ${{ steps.determine_pr.outputs.PR_NUMBER }} --json author --jq '.author.login')
+          BRANCH=$(gh pr view -R ${{ github.repository }} ${{ steps.determine_pr.outputs.PR_NUMBER }} --json headRefName --jq '.headRefName')
 
           if [ "$PR_AUTHOR" == "github-actions[bot]" ]; then
             echo "Deleting merged branch: $BRANCH"
