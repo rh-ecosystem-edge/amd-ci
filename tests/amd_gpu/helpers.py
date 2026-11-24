@@ -232,6 +232,7 @@ def run_gpu_command(
     image: str = ROCM_TEST_IMAGE,
     gpu_count: str = "1",
     timeout: int = POD_COMPLETION_TIMEOUT,
+    env: dict[str, str] | None = None,
 ) -> str:
     """Create a privileged pod with a GPU, run *command*, and return its logs.
 
@@ -246,6 +247,7 @@ def run_gpu_command(
         image: Container image (default: ``rocm/rocm-terminal:latest``).
         gpu_count: Number of GPUs to request as a string.
         timeout: Seconds to wait for the pod to finish.
+        env: Optional environment variables to set on the container.
 
     Returns:
         The container log output.
@@ -255,6 +257,12 @@ def run_gpu_command(
         TimeoutError: If the pod does not finish in time.
     """
     delete_pod_if_exists(core_api, pod_name, namespace)
+
+    container_env = (
+        [client.V1EnvVar(name=k, value=v) for k, v in env.items()]
+        if env
+        else None
+    )
 
     pod_body = client.V1Pod(
         metadata=client.V1ObjectMeta(name=pod_name, namespace=namespace),
@@ -267,6 +275,7 @@ def run_gpu_command(
                     image=image,
                     image_pull_policy="IfNotPresent",
                     command=command,
+                    env=container_env,
                     resources=client.V1ResourceRequirements(
                         requests={GPU_RESOURCE_NAME: gpu_count},
                         limits={GPU_RESOURCE_NAME: gpu_count},

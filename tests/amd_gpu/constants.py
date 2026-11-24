@@ -45,6 +45,34 @@ ROCM_TEST_IMAGE = os.environ.get(
 )
 
 # ---------------------------------------------------------------------------
+# Stress / workload test images and parameters
+# ---------------------------------------------------------------------------
+# PyTorch and vLLM ROCm images ship the respective frameworks preinstalled.
+PYTORCH_TEST_IMAGE = os.environ.get(
+    "AMD_PYTORCH_TEST_IMAGE", "rocm/pytorch:latest"
+)
+VLLM_TEST_IMAGE = os.environ.get(
+    "AMD_VLLM_TEST_IMAGE", "rocm/vllm:latest"
+)
+
+# Small Hugging Face model used by the vLLM inference test (needs network).
+VLLM_MODEL = os.environ.get("AMD_VLLM_MODEL", "facebook/opt-125m")
+
+# Set to "false" to skip the vLLM test (e.g. on disconnected clusters).
+VLLM_TEST_ENABLED = os.environ.get("AMD_VLLM_TEST_ENABLED", "true").lower() != "false"
+
+# Number of GPUs each workload pod requests (as a string).
+WORKLOAD_GPU_COUNT = os.environ.get("AMD_WORKLOAD_GPU_COUNT", "1")
+
+# How long the GPU burn test keeps the GPU(s) under sustained matmul load.
+GPU_BURN_DURATION_SECONDS = int(os.environ.get("AMD_GPU_BURN_DURATION", "60"))
+
+# Workload pods pull very large images (rocm/pytorch, rocm/vllm) and may
+# download models, so they get a much longer completion budget than the
+# lightweight ROCm-tool pods.
+WORKLOAD_POD_TIMEOUT = int(os.environ.get("AMD_WORKLOAD_POD_TIMEOUT", "1800"))
+
+# ---------------------------------------------------------------------------
 # Labels applied by the Node Labeller
 # ---------------------------------------------------------------------------
 NODE_LABELLER_LABELS = [
